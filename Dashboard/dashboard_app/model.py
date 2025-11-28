@@ -1,8 +1,8 @@
 # A simplified version of the original code - https://github.com/abdur75648/UTRNet-High-Resolution-Urdu-Text-Recognition
 import torch.nn as nn
-from modules.dropout_layer import dropout_layer
-from modules.sequence_modeling import BidirectionalLSTM
-from modules.feature_extraction import UNet_FeatureExtractor
+from .modules.dropout_layer import dropout_layer
+from .modules.sequence_modeling import BidirectionalLSTM
+from .modules.feature_extraction import UNet_FeatureExtractor
 
 class Model(nn.Module):
 
@@ -50,8 +50,8 @@ class Model(nn.Module):
         contextual_feature3 = self.SequenceModeling(visual_feature_after_dropout3)
         contextual_feature4 = self.SequenceModeling(visual_feature_after_dropout4)
         contextual_feature5 = self.SequenceModeling(visual_feature_after_dropout5)
-        contextual_feature =  ( (contextual_feature1).add ((contextual_feature2).add(((contextual_feature3).add(((contextual_feature4).add(contextual_feature5)))))) ) * (1/5)
-
+        contextual_feature = (contextual_feature1 + contextual_feature2 + contextual_feature3 + contextual_feature4 + contextual_feature5) / 5
+        
         """ Prediction stage """
-        prediction = self.Prediction(contextual_feature.contiguous())
+        prediction = self.Prediction(contextual_feature)
         return prediction

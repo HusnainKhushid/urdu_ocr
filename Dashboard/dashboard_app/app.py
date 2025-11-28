@@ -1,13 +1,18 @@
 import torch
 import gradio as gr
-from read import text_recognizer
-from model import Model
-from utils import CTCLabelConverter
+from .read import text_recognizer
+from .model import Model
+from .utils import CTCLabelConverter
 from ultralytics import YOLO
 from PIL import ImageDraw
+import os
+import sys
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 """ vocab / character number configuration """
-file = open("UrduGlyphs.txt","r",encoding="utf-8")
+file = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "UrduGlyphs.txt"),"r",encoding="utf-8")
 content = file.readlines()
 content = ''.join([str(elem).strip('\n') for elem in content])
 content = content+" "
@@ -16,12 +21,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 converter = CTCLabelConverter(content)
 recognition_model = Model(num_class=len(converter.character), device=device)
 recognition_model = recognition_model.to(device)
-recognition_model.load_state_dict(torch.load("best_norm_ED.pth", map_location=device))
+recognition_model.load_state_dict(torch.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "best_norm_ED.pth"), map_location=device))
 recognition_model.eval()
 
-detection_model = YOLO("yolov8m_UrduDoc.pt")
+detection_model = YOLO(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "yolov8m_UrduDoc.pt"))
 
-examples = ["1.jpg","2.jpg","3.jpg"]
+examples = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "1.jpg"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "2.jpg"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "3.jpg")]
 
 input = gr.Image(type="pil",image_mode="RGB", label="Input Image")
 
@@ -49,20 +56,19 @@ def predict(input):
     for img in cropped_images:
         texts.append(text_recognizer(img, recognition_model, converter, device))
     
-    "Join the text"
-    text = "\n".join(texts)
-    
-    "Return the image with bounding boxes and the text"
-    return input,text
+    return "\n".join(texts), input
 
 output_image = gr.Image(type="pil",image_mode="RGB",label="Detected Lines")
 output_text = gr.Textbox(label="Recognized Text",interactive=True,show_copy_button=True)
 
-iface = gr.Interface(predict,
-                     inputs=input,
-                     outputs=[output_image,output_text],
-                     title="End-to-End Urdu OCR",
-                     description="Demo Web App For UTRNet\n(https://github.com/abdur75648/UTRNet-High-Resolution-Urdu-Text-Recognition)",
+iface = gr.Interface(fn=predict, 
+                     inputs=input, 
+                     outputs=[gr.Textbox(label="Recognized Text"), gr.Image(label="Detection Result")],
+                     title="Urdu Text Recognition",
+                     description="An application to recognize text from images of Urdu text.",
                      examples=examples,
+                     theme=gr.themes.Monochrome(),
                      allow_flagging="never")
-iface.launch()
+
+if __name__ == "__main__":
+    iface.launch()
