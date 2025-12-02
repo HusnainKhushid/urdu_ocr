@@ -15,6 +15,13 @@ The application is deployed on Hugging Face Spaces and is available for a live d
 > **Note:** *This version of the application uses a YoloV8 model for text detection. The original version of UTRNet uses ContourNet for this purpose. However, due to deployment issues, we have opted for YoloV8 in this demo. While YoloV8 is as accurate as ContourNet, it offers the advantages of faster processing and greater efficiency.*
 
 
+## Project Structure
+- `data/`: Contains dataset files and resources (e.g., UrduGlyphs.txt).
+- `models/`: Stores model checkpoints (.pth, .pt).
+- `src/`: Source code for training and data processing.
+- `notebooks/`: Jupyter notebooks for experimentation.
+- `dashboard/`: The web application code.
+
 ## Usage
 To install the application, first clone this repository. Then, install the necessary dependencies using the following command:
 ```bash
@@ -29,7 +36,7 @@ bash download_files.sh
 
 * To run the application, execute the following command:
 ```bash
-python app.py
+python -m dashboard.dashboard_app.app
 ```
 
 This command launches a Gradio app, which you can interact with to experience the capabilities of UTRNet.

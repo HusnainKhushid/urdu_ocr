@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Create directories if they don't exist
-mkdir -p static/images
+mkdir -p dashboard/static/images
 mkdir -p models
 
 # URLs of the files to be downloaded
@@ -19,7 +19,7 @@ model_urls=(
 # Download image files
 for url in "${image_urls[@]}"; do
   echo "Downloading $url..."
-  curl -L -o static/images/$(basename "$url") "$url"
+  curl -L -o dashboard/static/images/$(basename "$url") "$url"
 done
 
 # Download model files

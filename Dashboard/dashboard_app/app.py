@@ -11,8 +11,11 @@ import sys
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
 """ vocab / character number configuration """
-file = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "UrduGlyphs.txt"),"r",encoding="utf-8")
+file = open(os.path.join(PROJECT_ROOT, "data", "UrduGlyphs.txt"),"r",encoding="utf-8")
 content = file.readlines()
 content = ''.join([str(elem).strip('\n') for elem in content])
 content = content+" "
@@ -21,14 +24,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 converter = CTCLabelConverter(content)
 recognition_model = Model(num_class=len(converter.character), device=device)
 recognition_model = recognition_model.to(device)
-recognition_model.load_state_dict(torch.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "best_norm_ED.pth"), map_location=device))
+recognition_model.load_state_dict(torch.load(os.path.join(PROJECT_ROOT, "models", "best_norm_ED.pth"), map_location=device))
 recognition_model.eval()
 
-detection_model = YOLO(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "yolov8m_UrduDoc.pt"))
+detection_model = YOLO(os.path.join(PROJECT_ROOT, "models", "yolov8m_UrduDoc.pt"))
 
-examples = [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "1.jpg"),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "2.jpg"),
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "images", "3.jpg")]
+examples = [os.path.join(BASE_DIR, "static", "images", "1.jpg"),
+            os.path.join(BASE_DIR, "static", "images", "2.jpg"),
+            os.path.join(BASE_DIR, "static", "images", "3.jpg")]
 
 input = gr.Image(type="pil",image_mode="RGB", label="Input Image")
 
@@ -59,16 +62,14 @@ def predict(input):
     return "\n".join(texts), input
 
 output_image = gr.Image(type="pil",image_mode="RGB",label="Detected Lines")
-output_text = gr.Textbox(label="Recognized Text",interactive=True,show_copy_button=True)
+output_text = gr.Textbox(label="Recognized Text",interactive=True)
 
 iface = gr.Interface(fn=predict, 
                      inputs=input, 
                      outputs=[gr.Textbox(label="Recognized Text"), gr.Image(label="Detection Result")],
                      title="Urdu Text Recognition",
                      description="An application to recognize text from images of Urdu text.",
-                     examples=examples,
-                     theme=gr.themes.Monochrome(),
-                     allow_flagging="never")
+                     examples=examples)
 
 if __name__ == "__main__":
     iface.launch()

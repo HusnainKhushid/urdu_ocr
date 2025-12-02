@@ -1,0 +1,24 @@
+# General
+__pycache__/
+*.pyc
+.DS_Store
+.env
+venv/
+
+# Data and Models
+data/
+!data/UrduGlyphs.txt
+models/*.pth
+models/*.pt
+
+# Outputs
+saved_models/
+test_outputs/
+read_outputs/
+vis_salency_maps/
+check_dir/
+*.csv
+*.png
+
+# Dashboard assets
+dashboard/static/images/*.jpg

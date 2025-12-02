@@ -1,4 +1,3 @@
-# A simplified version of the original code - https://github.com/abdur75648/UTRNet-High-Resolution-Urdu-Text-Recognition
 import torch.nn as nn
 from .modules.dropout_layer import dropout_layer
 from .modules.sequence_modeling import BidirectionalLSTM

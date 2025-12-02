@@ -1,0 +1,16 @@
+torch
+torchvision
+PyArabic
+arabic-reshaper
+six
+numpy
+pillow
+tqdm
+opencv-python
+opencv-contrib-python
+ultralytics
+gradio
+spaces
+nltk
+pandas
+lmdb
