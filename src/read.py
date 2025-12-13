@@ -19,7 +19,56 @@ import torch.utils.data
 
 from models.model import Model
 from src.dataset import NormalizePAD
-from src.utils import CTCLabelConverter, AttnLabelConverter, Logger
+from src.dataset import NormalizePAD
+from src.dataset import NormalizePAD
+from src.utils import CTCLabelConverter, AttnLabelConverter, Logger, correct_skew
+from src.spell_checkers import NaiveBayesCorrector, KNNCorrector, HybridCorrector
+from sklearn.cluster import KMeans
+from collections import Counter
+import re
+import numpy as np
+import pickle
+
+def adaptive_binarization(image):
+    """
+    Applies adaptive binarization using K-Means Clustering (K=2) on pixel intensities.
+    Input: PIL Image
+    Output: Binarized PIL Image
+    """
+    # Convert to grayscale numpy array
+    try:
+        if image.mode != 'L':
+            image = image.convert('L')
+    except Exception:
+        pass # Handle if it's already a tensor or something unexpected, but we expect PIL
+
+    img_array = np.array(image)
+    h, w = img_array.shape
+    pixels = img_array.reshape(-1, 1) # Flatten
+    
+    # Use MiniBatchKMeans for speed if available, else KMeans
+    # User asked for sklearn.cluster.KMeans
+    kmeans = KMeans(n_clusters=2, random_state=0, n_init=10).fit(pixels)
+    labels = kmeans.labels_
+    centers = kmeans.cluster_centers_
+    
+    # Identify which cluster is background (lighter, higher value)
+    if centers[0] > centers[1]:
+        bg_label = 0
+        text_label = 1
+    else:
+        bg_label = 1
+        text_label = 0
+        
+    # Replace background with 255 (white) and text with 0 (black)
+    # Or keep original intensity for text? User said: "Replace all 'Background' pixels with pure white (255) and 'Text' with pure black (0) or keep original intensity."
+    # Binarization usually implies 0/255. Let's do 0/255 for clean OCR.
+    
+    binarized_pixels = np.where(labels == bg_label, 255, 0).astype(np.uint8)
+    binarized_img_array = binarized_pixels.reshape(h, w)
+    
+    return Image.fromarray(binarized_img_array)
+
 
 def read(opt, device):
     opt.device = device
@@ -50,6 +99,22 @@ def read(opt, device):
         img = Image.open(opt.image_path).convert('RGB')
     else:
         img = Image.open(opt.image_path).convert('L')
+    
+    # 1. Linear Regression Skew Correction
+    try:
+        img = correct_skew(img)
+    except Exception as e:
+        print(f"Warning: Skew correction failed: {e}")
+
+    # 2. K-Means Adaptive Binarization
+    # Only if not RGB (grayscale)
+    if not opt.rgb:
+        try:
+             # Need to ensure we pass a PIL image or handle conversion
+            img = adaptive_binarization(img)
+        except Exception as e:
+            print(f"Warning: Binarization failed: {e}")
+
     img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     w, h = img.size
     ratio = w / float(h)
@@ -70,6 +135,19 @@ def read(opt, device):
     _, preds_index = preds.max(2)
     preds_str = converter.decode(preds_index.data, preds_size.data)[0]
     
+    # 3. Spell Checker (Post-Processing)
+    if opt.correction_algo != 'none' and opt.literature_path:
+        checker = None
+        if opt.correction_algo == 'naive_bayes':
+            checker = NaiveBayesCorrector(opt.literature_path, alphabet=opt.character)
+        elif opt.correction_algo == 'knn':
+            checker = KNNCorrector(opt.literature_path)
+        elif opt.correction_algo == 'hybrid':
+            checker = HybridCorrector(opt.literature_path)
+            
+        if checker:
+            preds_str = checker.correct_text(preds_str)
+
     logger.log(preds_str)
 
 if __name__ == '__main__':
@@ -94,6 +172,9 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
     """ GPU Selection """
     parser.add_argument('--device_id', type=str, default=None, help='cuda device ID')
+    parser.add_argument('--literature_path', type=str, default='data/urdu_words.txt', help='Path to Urdu literature text file')
+    parser.add_argument('--correction_algo', type=str, default='naive_bayes', choices=['none', 'naive_bayes', 'knn', 'hybrid'], help='Spell correction algorithm')
+    # parser.add_argument('--use_knn', action='store_true', help='Deprecated: use --correction_algo knn')
     
     opt = parser.parse_args()
     if opt.FeatureExtraction == "HRNet":

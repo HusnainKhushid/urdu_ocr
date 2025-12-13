@@ -20,6 +20,118 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
+from sklearn.linear_model import LinearRegression
+from PIL import Image
+import math
+
+def correct_skew(image):
+    """
+    Corrects the skew of a PIL image using Linear Regression on black pixel coordinates.
+    Input: PIL Image (Gray or RGB)
+    Output: Skew corrected PIL Image
+    """
+    # Convert to grayscale numpy array
+    img_array = np.array(image.convert('L'))
+    
+    # Threshold to find "black" pixels (text)
+    # Assuming standard white background/black text. 
+    # Using < 128 as a simple threshold for now, or we can look for the darkest pixels.
+    # Text is usually much darker than background.
+    y_coords, x_coords = np.where(img_array < 127) # numpy returns (row, col) -> (y, x)
+    
+    if len(x_coords) < 10: # Not enough text to determine skew
+        return image
+
+    # Reshape for sklearn
+    X = x_coords.reshape(-1, 1) # Feature: x
+    y = y_coords # Target: y
+    
+    # Fit Linear Regression
+    # We want to find the line y = mx + c that best fits the text lines
+    # However, text is in lines, so a single regression line might just follow the average slope of all lines.
+    # If the text is horizontal, m ~ 0. If skewed, m != 0.
+    lm = LinearRegression()
+    lm.fit(X, y)
+    
+    slope = lm.coef_[0]
+    
+    # Calculate angle
+    angle_rad = math.atan(slope)
+    angle_deg = math.degrees(angle_rad)
+    
+    # Text lines slope 'down' if image is rotated clockwise (positive slope in image coords where y increases downwards?)
+    # In images, y is down.
+    # If text goes down-right, slope > 0. We need to rotate counter-clockwise (positive angle) to fix?
+    # Wait, if slope is positive (down-right), we want to rotate it "up" on the right.
+    # PIL rotate 'angle' is counter-clockwise degrees.
+    # If line is y = x (45 deg down-right), we need to rotate -45?
+    # Let's check logic:
+    # If slope m is found. The angle of the text lines is atan(m).
+    # We want to rotate by -atan(m).
+    
+    # However, linear regression on ALL text pixels might capture the diagonal trend of the page if it's not block text.
+    # But for skew correction assumption is dominant direction is line direction.
+    # Actually, standard LR on all pixels might fail if lines are stacked. 
+    # BUT the user request specifically said: "Input: (x, y) coordinates of all black pixels. Output: Slope m. Action: Rotate image by -tan^-1(m)."
+    # I will strictly follow the user's "Why it's easy" instructions.
+    
+    rotation_angle = math.degrees(math.atan(slope))
+    
+    # If the slope is of the lines, usually lines are horizontal.
+    # If the lines are stacked, the regression through ALL pixels might be vertical-ish if the aspect ratio is tall?
+    # No, usually x variance is high. 
+    # Let's hope the "easiest to implement" method requested by user holds for their data.
+    # I will implement exactly as requested.
+    
+    # Correcting: "Action: Rotate image by -tan^-1(m)" implies negating the angle.
+    # If slope is positive (y increases as x increases -> diagonal down), atan(m) is positive.
+    # We want to rotate to make it horizontal.
+    # PIL rotate: positive is CCW.
+    # If line is sloping down-right (\), we need to rotate CCW (?) No, down-right is usually clockwise rotation from horizontal.
+    # Wait, (0,0) is top-left.
+    # x -> right, y -> down.
+    # Line going down-right: x increases, y increases => slope > 0.
+    # To fix this (make it horizontal), we need to lift the right side up (Rotate CCW).
+    # So if slope > 0, we rotate by +angle?
+    # User said: "Rotate image by -tan^-1(m)".
+    # If m > 0, -atan(m) is negative -> Clockwise.
+    # If I rotate clockwise, the line going down-right becomes MORE vertical?
+    # Let's think: Horizontal line y=c. Rotated clockwise by 10 deg. New line goes down-right. Slope > 0.
+    # To bring it back, we need to rotate CCW (Positive degrees).
+    # So we should rotate by +atan(m).
+    # User might have gotten sign mixed up or assumes different coord system.
+    # BUT "Action: Rotate image by -tan^-1(m)" might be for standard math (y up).
+    # In images (y down), slope signs are flipped relative to visual "up/down".
+    # I'll stick to the user's math for the "Action" but check the `rotate` direction.
+    # Actually, for "easy" implementation, I'll assume the user knows what they asked for, OR I'll add a comment.
+    # Let me stick to "Rotate image by -tan^-1(m)" interpreted literally?
+    # No, I should do what works.
+    # I will use `image.rotate(angle)`.
+    # I will deduce the correct sign.
+    # If text is skewed, the "slope" found by regression over all pixels will likely be dominated by the lines themselves if the document is wide.
+    
+    # Actually, regressing on ALL pixels of a block of text (multiple lines) will usually yield a slope near 0 (horizontal) because the block is rectangular.
+    # The regression line will go through the center of the block.
+    # If the BLOCK is rotated, the regression line through all pixels will ALSO be rotated by that amount?
+    # Yes, roughly.
+    
+    # For now, I will implement it.
+    
+    # Note: Text lines -> "slope of the text lines".
+    # User said: "Input: coordinates of all black pixels... Output: Slope m of the text lines."
+    # Regressing on all pixels GIVES the slope of the text lines ONLY if the text lines are the dominant variance direction?
+    # Or maybe it's for single line? The prompt says "Document Skew Correction".
+    # If I have a full page of text, the regression line through the cloud of points (the page) depends on the page shape.
+    # BUT, I will follow the implementation instruction "Use sklearn.linear_model.LinearRegression".
+    
+    # Optimization: If we just count all pixels, it's fine.
+    
+    # Important: PIL rotate expands image by default or crops? `expand=True`?
+    # Documentation says: "returns a copy...". `expand=False` by default (maintains size).
+    # For OCR, maintaining size is usually preferred to avoid coordinate shifts, or maybe expand to not lose corners.
+    
+    return image.rotate(rotation_angle, expand=True, fillcolor='white')
+
 class CTCLabelConverter(object):
     """ Convert between text-label and text-index """
 

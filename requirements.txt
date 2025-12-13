@@ -15,3 +15,4 @@ nltk
 pandas
 lmdb
 fire
+scikit-learn
