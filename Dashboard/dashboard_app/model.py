@@ -1,7 +1,12 @@
 import torch.nn as nn
-from .modules.dropout_layer import dropout_layer
-from .modules.sequence_modeling import BidirectionalLSTM
-from .modules.feature_extraction import UNet_FeatureExtractor
+try:
+    from .modules.dropout_layer import dropout_layer
+    from .modules.sequence_modeling import BidirectionalLSTM
+    from .modules.feature_extraction import UNet_FeatureExtractor
+except ImportError:
+    from modules.dropout_layer import dropout_layer
+    from modules.sequence_modeling import BidirectionalLSTM
+    from modules.feature_extraction import UNet_FeatureExtractor
 
 class Model(nn.Module):
 

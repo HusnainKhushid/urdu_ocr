@@ -1,6 +1,9 @@
 # A simplified version of the original code - https://github.com/abdur75648/UTRNet-High-Resolution-Urdu-Text-Recognition
 import torch.nn as nn
-from .cnn.unet import UNet
+try:
+    from .cnn.unet import UNet
+except ImportError:
+    from modules.cnn.unet import UNet
 
 class UNet_FeatureExtractor(nn.Module):
     def __init__(self, input_channel=1, output_channel=512):

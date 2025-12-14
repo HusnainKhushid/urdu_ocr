@@ -1,182 +1,234 @@
 import os
-import json
+import sys
+import time
 import torch
-import gradio as gr
+import streamlit as st
+from PIL import Image, ImageDraw
+import numpy as np
 from ultralytics import YOLO
-from PIL import ImageDraw
 
-from .read import text_recognizer
-from .model import Model
-from .utils import CTCLabelConverter
+# Add current directory to path to allow imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
+try:
+    from read import text_recognizer
+    from model import Model
+    from utils import CTCLabelConverter
+except ImportError as e:
+    st.error(f"Error importing modules: {e}. Make sure read.py, model.py, and utils.py are in the same directory.")
+    st.stop()
 
-# Add the parent directory to the Python path
+# --- Configuration ---
+st.set_page_config(
+    page_title="Urdu OCR - UTRNet",
+    page_icon="🌙",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
+# --- Path Setup ---
+BASE_DIR = os.path.dirname(current_dir) # dashboard/
+PROJECT_ROOT = os.path.dirname(BASE_DIR) # Projects/ML/
 
-""" vocab / character number configuration """
-file = open(os.path.join(PROJECT_ROOT, "data", "UrduGlyphs.txt"),"r",encoding="utf-8")
-content = file.readlines()
-content = ''.join([str(elem).strip('\n') for elem in content])
-content = content+" "
-""" model configuration """
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-converter = CTCLabelConverter(content)
-recognition_model = Model(num_class=len(converter.character), device=device)
-recognition_model = recognition_model.to(device)
-recognition_model.load_state_dict(torch.load(os.path.join(PROJECT_ROOT, "models", "best_norm_ED.pth"), map_location=device))
-recognition_model.eval()
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-detection_model = YOLO(os.path.join(PROJECT_ROOT, "models", "yolov8m_UrduDoc.pt"))
+# --- Resource Loading ---
+@st.cache_resource
+def load_resources():
+    """Load models and converters once."""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # 1. Load Vocabulary
+    vocab_path = os.path.join(DATA_DIR, "UrduGlyphs.txt")
+    if not os.path.exists(vocab_path):
+        st.error(f"Vocabulary file not found at: {vocab_path}")
+        return None, None, None, None
 
-examples = [os.path.join(BASE_DIR, "static", "images", name) for name in ["1.jpg", "2.jpg", "3.jpg"] if os.path.exists(os.path.join(BASE_DIR, "static", "images", name))]
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        content = f.readlines()
+    content = ''.join([str(elem).strip('\n') for elem in content])
+    content = content + " "
+    
+    converter = CTCLabelConverter(content)
+    
+    # 2. Load Recognition Model
+    recognition_model = Model(num_class=len(converter.character), device=device)
+    recognition_model = recognition_model.to(device)
+    
+    rec_weights_path = os.path.join(MODELS_DIR, "best_norm_ED.pth")
+    if os.path.exists(rec_weights_path):
+        recognition_model.load_state_dict(torch.load(rec_weights_path, map_location=device))
+        recognition_model.eval()
+    else:
+        st.warning(f"Recognition weights not found at {rec_weights_path}")
+    
+    # 3. Load Detection Model
+    det_weights_path = os.path.join(MODELS_DIR, "yolov8m_UrduDoc.pt")
+    if os.path.exists(det_weights_path):
+        detection_model = YOLO(det_weights_path)
+    else:
+        st.error(f"YOLO weights not found at {det_weights_path}")
+        detection_model = None
 
+    return recognition_model, detection_model, converter, device
+
+# Initialize resources
+rec_model, det_model, converter, device = load_resources()
+
+if not (rec_model and det_model):
+    st.stop()
+
+# --- Helper Functions ---
 def format_fir(lines):
-    """Lightweight FIR formatter: groups line-wise OCR into numbered sections."""
+    """Lightweight FIR formatter."""
     sections = []
     for idx, text in enumerate(lines, start=1):
         sections.append({"section": f"Line {idx}", "text": text})
-    return {"status": "draft", "lines": sections}
+    return {"status": "processed", "count": len(lines), "lines": sections}
 
-def predict(input_img, progress=gr.Progress()):
-    """Full pipeline with visual stages and simple FIR formatting."""
-    import time
+def run_pipeline(image):
+    """Run the Full OCR Pipeline."""
+    status_log = []
     
-    if input_img is None:
-        return "", None, None, [], [[]], {}, "❌ No image provided"
+    # Status Container
+    status_container = st.status("🚀 Starting OCR Pipeline...", expanded=True)
     
-    status_msg = ""
-    print(f"Device: {device} | GPU Available: {torch.cuda.is_available()}")
+    # 1. Detection
+    status_container.write("🔍 Stage 1: Detecting text lines...")
+    start_time = time.time()
     
-    # Stage 1: Detection (ultra-aggressive)
-    progress(0, desc="🔍 Detecting text lines...")
-    status_msg += "🔍 Stage 1: Detecting text lines...\n"
-    start = time.time()
-    detection_results = detection_model.predict(
-        source=input_img, 
-        conf=0.01,  # Ultra-low confidence to catch everything
-        imgsz=1280,  # Maximum size for best detection
-        save=False, 
-        agnostic_nms=True,  # Class-agnostic NMS
-        max_det=300,  # Allow up to 300 detections
+    results = det_model.predict(
+        source=image,
+        conf=0.01,
+        imgsz=1280,
+        save=False,
+        agnostic_nms=True,
+        max_det=300,
         device=device,
         verbose=False
     )
-    elapsed = time.time()-start
     
-    bounding_boxes = detection_results[0].boxes.xyxy.cpu().numpy().tolist()
-    bounding_boxes.sort(key=lambda x: x[1])
-    status_msg += f"   ✓ Found {len(bounding_boxes)} lines in {elapsed:.2f}s\n"
-    print(status_msg)
+    boxes = results[0].boxes.xyxy.cpu().numpy().tolist()
+    boxes.sort(key=lambda x: x[1]) # Sort by Y coordinate
     
-    progress(0.2, desc=f"🎨 Drawing boxes on {len(bounding_boxes)} lines...")
+    elapsed = time.time() - start_time
+    status_container.write(f"   ✓ Found {len(boxes)} lines in {elapsed:.2f}s")
     
-    # Stage 2: Overlay visualization
-    overlay = input_img.copy()
+    # 2. Visualization
+    status_container.write("🎨 Stage 2: Creating visualization...")
+    overlay = image.copy()
     draw = ImageDraw.Draw(overlay)
-    from numpy import random
-    for i, box in enumerate(bounding_boxes):
-        color = tuple(random.randint(50, 255, 3))
+    
+    for i, box in enumerate(boxes):
+        color = tuple(np.random.randint(50, 255, 3))
         draw.rectangle(box, outline=color, width=4)
         draw.text((box[0] + 5, box[1] + 5), str(i + 1), fill=color)
-    status_msg += "   ✓ Overlay created\n"
     
-    progress(0.3, desc="✂️ Cropping lines...")
+    # 3. Cropping
+    status_container.write("✂️ Stage 3: Cropping text lines...")
+    crops = [image.crop(box) for box in boxes]
     
-    # Stage 3: Crops
-    cropped_images = [input_img.crop(box) for box in bounding_boxes]
-    status_msg += f"   ✓ Cropped {len(cropped_images)} lines\n"
+    # 4. OCR
+    status_container.write("📖 Stage 4: Running OCR on crops...")
+    ocr_texts = []
+    ocr_start = time.time()
     
-    # Prep early gallery for visual feedback
-    gallery_items = [(img, f"Line {idx}") for idx, img in enumerate(cropped_images, 1)]
+    prog_bar = status_container.progress(0)
     
-    progress(0.4, desc="📖 Running OCR...")
-    
-    # Stage 4: OCR per crop
-    line_texts = []
-    start = time.time()
-    for idx, img in enumerate(cropped_images, 1):
-        progress(0.4 + (0.5 * idx / len(cropped_images)), desc=f"📖 OCR Line {idx}/{len(cropped_images)}...")
+    for idx, crop in enumerate(crops):
         try:
-            text = text_recognizer(img, recognition_model, converter, device)
-            line_texts.append(text)
-            print(f"   Line {idx}: {text[:60]}")
+            text = text_recognizer(crop, rec_model, converter, device)
+            ocr_texts.append(text)
         except Exception as e:
-            print(f"   Line {idx}: ERROR - {e}")
-            line_texts.append("[ERROR]")
+            ocr_texts.append(f"[Error: {e}]")
+        
+        # Update progress
+        prog_bar.progress((idx + 1) / len(crops))
     
-    elapsed = time.time()-start
-    status_msg += f"   ✓ OCR completed in {elapsed:.2f}s\n"
+    ocr_elapsed = time.time() - ocr_start
+    status_container.write(f"   ✓ OCR completed in {ocr_elapsed:.2f}s")
+    
+    # 5. Finalize
+    status_container.update(label="✅ Pipeline Completed!", state="complete", expanded=False)
+    
+    return overlay, crops, ocr_texts, format_fir(ocr_texts)
 
-    joined_text = "\n".join(line_texts)
-    
-    progress(0.95, desc="📋 Formatting FIR...")
-    
-    # Stage 5: Structured FIR
-    fir_struct = format_fir(line_texts)
-    status_msg += "   ✓ FIR formatted\n"
 
-    # Update gallery with OCR text
-    gallery_items_final = []
-    for idx, img in enumerate(cropped_images, start=1):
-        txt = line_texts[idx-1] if idx-1 < len(line_texts) else ''
-        gallery_items_final.append((img, f"L{idx}: {txt[:80]}"))
-    
-    status_msg += "✅ DONE! All stages completed.\n"
-    print(status_msg)
-    
-    progress(1.0, desc="✅ Complete!")
-    
-    return joined_text, overlay, gallery_items_final, gallery_items_final, [[i+1, t] for i, t in enumerate(line_texts)], fir_struct, status_msg
+# --- UI Layout ---
+st.title("🌙 Urdu OCR - UTRNet Dashboard")
+st.markdown("Upload a document or FIR image to extract Urdu text using the UTRNet pipeline.")
 
-with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard") as iface:
-    gr.Markdown("# 🌙 Urdu OCR - UTRNet Visual Pipeline\nUpload FIR or any Urdu document to extract text with live processing feedback.")
+# Sidebar
+with st.sidebar:
+    st.header("Input Source")
+    input_method = st.radio("Choose input:", ["Upload Image", "Use Example"])
     
-    with gr.Row():
-        with gr.Column(scale=1):
-            inp = gr.Image(
-                type="pil",
-                label="📄 Upload Document",
-                sources=["upload", "clipboard"],
-                height=500
-            )
-            run_btn = gr.Button("▶️ Run OCR", size="lg", variant="primary")
+    image_file = None
+    if input_method == "Upload Image":
+        image_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+    else:
+        # Load examples
+        images_dir = os.path.join(STATIC_DIR, "images")
+        if os.path.exists(images_dir):
+            example_files = [f for f in os.listdir(images_dir) if f.lower().endswith(('.jpg', '.png'))]
+            selected_example = st.selectbox("Select an example:", example_files)
+            if selected_example:
+                image_file = os.path.join(images_dir, selected_example)
+        else:
+            st.warning("No examples found in static/images")
+
+    st.divider()
+    st.info(f"Device: {device}")
+    st.info(f"GPU Available: {torch.cuda.is_available()}")
+
+# Main Logic
+if image_file:
+    # Load Image
+    try:
+        if isinstance(image_file, str):
+            image = Image.open(image_file).convert("RGB")
+        else:
+            image = Image.open(image_file).convert("RGB")
             
-            gr.Markdown("### 📋 Example Images")
-            gr.Examples(
-                examples,
-                inputs=inp,
-                label="Click to try examples"
-            )
+        st.image(image, caption="Input Image", use_container_width=True)
         
-        with gr.Column(scale=2):
-            status_box = gr.Textbox(label="⚙️ Processing Status", lines=10, max_lines=15, interactive=False)
-            recognized = gr.Textbox(label="📝 Recognized Text (Urdu)", lines=12)
-            struct = gr.JSON(label="📋 Formatted FIR Output")
-    
-    with gr.Accordion("🔧 Processing Details (Click to Expand)", open=False):
-        det_img = gr.Image(label="🎯 Detection Overlay with Numbered Boxes", type="pil")
-        
-        gallery = gr.Gallery(
-            label="✂️ Cropped Lines with OCR Preview",
-            columns=5,
-            height="auto",
-            show_label=True
-        )
-        
-        line_table = gr.Dataframe(
-            headers=["Line #", "Urdu Text"],
-            label="📖 Line-by-Line OCR Results",
-            wrap=True,
-            interactive=False
-        )
-
-    run_btn.click(
-        fn=predict,
-        inputs=inp,
-        outputs=[recognized, det_img, gallery, gallery, line_table, struct, status_box]
-    )
-
-if __name__ == "__main__":
-    iface.launch()
+        if st.button("▶️ Run OCR Extraction", type="primary"):
+            
+            overlay_img, cropped_imgs, texts, json_output = run_pipeline(image)
+            
+            # --- Results Display ---
+            st.divider()
+            st.header("📝 Results")
+            
+            tab1, tab2, tab3, tab4 = st.tabs(["📄 Full Text", "🔍 Detection Overlay", "✂️ Line Details", "💾 JSON Data"])
+            
+            with tab1:
+                full_text = "\n".join(texts)
+                st.text_area("Extracted Text", value=full_text, height=400)
+                st.download_button("Download Text", full_text, "urdu_ocr_result.txt")
+            
+            with tab2:
+                st.image(overlay_img, caption="Detected Text Lines", use_container_width=True)
+                
+            with tab3:
+                st.write(f"Extracted {len(cropped_imgs)} lines:")
+                # Display lines in a grid or list
+                for i, (crop, txt) in enumerate(zip(cropped_imgs, texts)):
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        st.image(crop, use_container_width=True)
+                    with c2:
+                        st.markdown(f"**Line {i+1}:**")
+                        st.text_input(label=f"hidden_l{i}", value=txt, label_visibility="collapsed", key=f"txt_{i}")
+                    st.divider()
+            
+            with tab4:
+                st.json(json_output)
+                
+    except Exception as e:
+        st.error(f"Error processing image: {e}")
+else:
+    st.info("👈 Please upload an image or select an example to begin.")
