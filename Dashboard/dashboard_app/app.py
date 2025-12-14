@@ -130,7 +130,7 @@ def predict(input_img, progress=gr.Progress()):
     
     return joined_text, overlay, gallery_items_final, gallery_items_final, [[i+1, t] for i, t in enumerate(line_texts)], fir_struct, status_msg
 
-with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft()) as iface:
+with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard") as iface:
     gr.Markdown("# 🌙 Urdu OCR - UTRNet Visual Pipeline\nUpload FIR or any Urdu document to extract text with live processing feedback.")
     
     with gr.Row():
