@@ -6,10 +6,9 @@ from .utils import CTCLabelConverter
 from ultralytics import YOLO
 from PIL import ImageDraw
 import os
-import sys
+
 
 # Add the parent directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)

@@ -85,11 +85,22 @@ cd urdu_ocr
 pip install -r requirements.txt
 ```
 
-3. **Download required data** (if not included)
-   - Pre-trained model weights: `models/best_norm_ED.pth`
-   - YOLOv8 model: `models/yolov8m_UrduDoc.pt`
-   - Urdu glyphs file: `data/UrduGlyphs.txt`
-   - Urdu literature corpus for spell checking (optional)
+3. **Download required data**
+   
+   The repository includes `data/UrduGlyphs.txt` (vocabulary file) but you need to download the models:
+
+   **Option 1: Automatic download (bash)**
+   ```bash
+   bash download_files.sh
+   ```
+
+   **Option 2: Manual download**
+   - Pre-trained model weights: [best_norm_ED.pth](https://huggingface.co/spaces/abdur75648/UrduOCR-UTRNet/resolve/main/best_norm_ED.pth)
+   - YOLOv8 model: [yolov8m_UrduDoc.pt](https://huggingface.co/spaces/abdur75648/UrduOCR-UTRNet/resolve/main/yolov8m_UrduDoc.pt)
+   - Place both files in the `models/` directory
+
+   **Optional:**
+   - Urdu literature corpus for spell checking: Create `data/urdu_corpus.txt` with Urdu text samples
 
 ## 🚀 Quick Start
 
