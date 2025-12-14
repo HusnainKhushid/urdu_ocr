@@ -1,0 +1,151 @@
+% IEEE Conference Paper Template
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+% Packages
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Machine Learning-Enhanced Urdu OCR System: A Comprehensive Approach}
+
+\author{
+\IEEEauthorblockN{Student Name 1}
+\IEEEauthorblockA{\textit{Dept. of Computing, NUST} \\
+Islamabad, Pakistan \\
+student1@email.edu}
+\and
+\IEEEauthorblockN{Student Name 2}
+\IEEEauthorblockA{\textit{Dept. of Computing, NUST} \\
+Islamabad, Pakistan \\
+student2@email.edu}
+\and
+\IEEEauthorblockN{Student Name 3}
+\IEEEauthorblockA{\textit{Dept. of Computing, NUST} \\
+Islamabad, Pakistan \\
+student3@email.edu}
+}
+
+\maketitle
+
+\begin{abstract}
+Urdu text recognition presents challenges due to cursive script, degradation, and data scarcity. We present an end-to-end ML-enhanced OCR system addressing these issues. Our pipeline integrates Linear Regression for skew correction, K-Means for adaptive binarization, and Random Forest for noise classification. Post-OCR, a hybrid spell checker (KNN + Naive Bayes) corrects recognition errors. Trained on a synthetically generated dataset of 5,000 images, our system achieves a 59\% reduction in Word Error Rate (WER) compared to baselines. The solution is deployed as a functional web dashboard.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Urdu OCR, Machine Learning, Skew Detection, Adaptive Binarization, Spell Checking.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Optical Character Recognition (OCR) for cursive scripts like Urdu remains challenging due to complex morphology, ligatures, and document degradation \cite{urdu_ocr_challenges}. Existing solutions often fail on varied real-world documents. This project implements a robust OCR pipeline focusing on three areas: geometric correction, adaptive preprocessing, and error correction.
+
+We address the lack of distinct datasets by creating a synthetic dataset with controlled noise. Our approach prioritizes classical machine learning models—Linear Regression, K-Means, and Random Forest—over heavy deep learning architectures, offering interpretability and efficiency. Key contributions include an automated skew corrector, an adaptive binarizer, and a hybrid spell-checking mechanism, all integrated into a Streamlit-based Proof of Concept (PoC).
+
+\section{Related Work}
+
+Traditional Urdu OCR relied on template matching, while recent works leverage CNNs and LSTMs \cite{urdu_deep_learning}. However, preprocessing is often overlooked. Skew detection typically uses projection profiles; we enhance this with regression. For binarization, while Otsu's method is standard, adaptive techniques are superior for degraded documents \cite{binarization_survey}. Spell checking in low-resource languages typically uses edit distance; we improve this with probabilistic models \cite{urdu_spell_check}.
+
+\section{Data Acquisition}
+
+Due to data scarcity, we generated a synthetic dataset of 5,000 Urdu document images using Adobe Photoshop. We utilized 8 fonts (Nastaliq, Naskh) and applied realistic degradations including film grain, Gaussian noise, geometric skew ($\pm15^\circ$), and perspective distortion. The dataset, split 70/15/15 for train/val/test, includes perfect ground truth for text, skew angle, and noise levels.
+
+\section{Methodology}
+
+\subsection{Preprocessing Pipeline}
+
+\subsubsection{Skew Detection}
+We extract edges using Canny edge detection and identifying lines via Hough Transform \cite{hough_transform}. We then fit a Linear Regression model with RANSAC to robustly estimate the skew angle from these lines, achieving an MAE of 0.23$^\circ$ (see Fig. \ref{fig:skew_mae}).
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.8\columnwidth]{figures/skew_mae.png}}
+\caption{Skew Detection MAE Comparison.}
+\label{fig:skew_mae}
+\end{figure}
+
+\subsubsection{Observation & Binarization}
+To handle uneven illumination, we use K-Means clustering ($K=2$) to separate foreground text from background based on intensity and local texture statistics (mean, variance). This adaptive method (Fig. \ref{fig:bin_metrics}) outperformed Otsu's method by 4.3 dB in PSNR.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.8\columnwidth]{figures/binarization_metrics.png}}
+\caption{Binarization Quality Metrics.}
+\label{fig:bin_metrics}
+\end{figure}
+
+\subsubsection{Noise Classification}
+A Random Forest classifier (100 trees) assesses document quality using 24 features (SNR, edge density, texture). It identifies noisy documents with 92.3\% accuracy (Fig. \ref{fig:noise_confusion}), triggering manual review if needed. We prioritized RF over CNN for its similar accuracy but faster inference.
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.6\columnwidth]{figures/noise_confusion_matrix.png}}
+\caption{Noise Classification Confusion Matrix.}
+\label{fig:noise_confusion}
+\end{figure}
+
+\subsection{Spell Checking}
+We address OCR errors using a hybrid pipeline:
+\begin{enumerate}
+    \item \textbf{Candidate Generation}: KNN retrieves nearest neighbors via Levenshtein distance.
+    \item \textbf{Re-ranking}: Logistic Regression scores candidates using n-gram and phonetic features.
+    \item \textbf{Scoring}: Naive Bayes calculates final probability $P(c|w)$.
+\end{enumerate}
+This hybrid approach balances speed and accuracy (Fig. \ref{fig:spell_tradeoff}).
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.8\columnwidth]{figures/spell_checker_tradeoff.png}}
+\caption{Spell Checker Accuracy vs. Speed.}
+\label{fig:spell_tradeoff}
+\end{figure}
+
+\section{Results}
+
+Our complete pipeline significantly outperforms baselines. Table \ref{tab:ocr_endtoend} and Fig. \ref{fig:ocr_perf} show a reduction in Word Error Rate (WER) from 18.7\% (Tesseract default) to 7.7\% (Our System).
+
+\begin{table}[htbp]
+\caption{End-to-End OCR Performance}
+\centering
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Pipeline} & \textbf{CER (\%)} & \textbf{WER (\%)} \\ \midrule
+Baseline 1 (Tesseract default) & 12.4 & 18.7 \\
+Our System (Full pipeline) & \textbf{4.8} & \textbf{7.7} \\ \bottomrule
+\end{tabular}
+\label{tab:ocr_endtoend}
+\end{table}
+
+\begin{figure}[htbp]
+\centerline{\includegraphics[width=0.8\columnwidth]{figures/ocr_performance.png}}
+\caption{End-to-End OCR Performance.}
+\label{fig:ocr_perf}
+\end{figure}
+
+\section{Proof of Concept}
+
+We laid out a Streamlit dashboard allowing users to upload images and view pipeline stages: skew correction, binarization, quality check, and final text. Features include batch processing and downloadable results.
+
+\section{Conclusion}
+
+This work demonstrates that classical ML techniques can effectively optimize OCR pipelines for low-resource languages. Our synthetic dataset and hybrid spell checker were pivotal in reducing WER by 59\%. Future work includes handling handwriting and integrating contextual language models.
+
+\begin{thebibliography}{00}
+\bibitem{urdu_ocr_challenges} Ahmed et al., ``Survey of OCR techniques,'' 2004.
+\bibitem{urdu_deep_learning} Naz et al., ``Urdu Nastaliq recognition,'' \textit{Neurocomputing}, 2017.
+\bibitem{hough_skew} Duda et al., ``Use of Hough transformation,'' 1972.
+\bibitem{binarization_survey} Gatos et al., ``Adaptive binarization,'' 2006.
+\bibitem{spell_check_survey} Kernighan et al., ``Spelling correction,'' 1990.
+\bibitem{urdu_spell_check} Ali et al., ``Urdu spell checking,'' 2007.
+\bibitem{hough_transform} Hough, ``Method and means for recognizing complex patterns,'' 1962.
+\end{thebibliography}
+
+\end{document}
