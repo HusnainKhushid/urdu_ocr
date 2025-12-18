@@ -9,6 +9,8 @@ from .read import text_recognizer
 from .model import Model
 from .utils import CTCLabelConverter
 
+from .gemini_extractor import extract_fields_from_image, format_fields_for_display
+
 
 # Add the parent directory to the Python path
 
@@ -106,12 +108,171 @@ def predict(input_img, progress=gr.Progress()):
             print(f"   Line {idx}: ERROR - {e}")
             line_texts.append("[ERROR]")
     
+<<<<<<< Updated upstream
     elapsed = time.time()-start
     status_msg += f"   ✓ OCR completed in {elapsed:.2f}s\n"
 
     joined_text = "\n".join(line_texts)
     
     progress(0.95, desc="📋 Formatting FIR...")
+=======
+    # 4. Gemini Field Extraction (prints to terminal)
+    print("\n" + "=" * 60)
+    print("📤 Sending image to Gemini for field extraction...")
+    gemini_data = extract_fields_from_image(image, print_to_terminal=True)
+    gemini_formatted = format_fields_for_display(gemini_data)
+    
+    # Also print OCR results to terminal
+    print("\n" + "=" * 60)
+    print("📖 UTRNet OCR RESULTS")
+    print("=" * 60)
+    for i, txt in enumerate(ocr_texts):
+        print(f"  Line {i+1}: {txt}")
+    print("=" * 60 + "\n")
+    
+    # status_container.update(label="✅ Done!", state="complete", expanded=False)
+    
+    # Store results
+    st.session_state.results = {
+        "text": "\n".join(ocr_texts),
+        "overlay": overlay,
+        "crops": crops,
+        "line_texts": ocr_texts,
+        "json": [{"line": i+1, "text": t} for i, t in enumerate(ocr_texts)],
+        "gemini_data": gemini_data,
+        "gemini_text": gemini_formatted
+    }
+    st.session_state.processed = True
+
+# --- Custom CSS ---
+def inject_custom_css():
+    st.markdown("""
+        <style>
+        /* Global Font */
+        html, body, [class*="css"] {
+            font-family: 'Helvetica', sans-serif;
+            font-weight: bold;
+            color: #1a1a1a;
+        }
+        
+        /* App Background */
+        .stApp {
+            background-color: #f3fcf4; /* Very light slightly green tint */
+        }
+        
+        /* Box/Card Styling - Official Document Look */
+        .custom-card {
+            background-color: white;
+            padding: 30px;
+            border-radius: 4px; /* Sharper corners */
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); /* Softer shadow */
+            height: 100%;
+            border: 1px solid #e2e8f0;
+            border-top: 5px solid #115740; /* Pakistan Green Top Border */
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Headers */
+        h1 {
+            color: #115740; /* Pakistan Green */
+            font-family: 'Helvetica', sans-serif;
+            font-weight: 800; /* Extra Bold */
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+        h2, h3 {
+            color: #115740;
+            font-family: 'Helvetica', sans-serif;
+            font-weight: bold;
+            text-align: center;
+        }
+        h4, h5 {
+            color: #856404; /* Gold/Dark Yellowish */
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 0;
+        }
+        
+        /* Buttons - Official Green */
+        .stButton {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+        }
+        .stButton>button {
+            width: 80% !important;
+            border-radius: 4px;
+            background-color: #115740;
+            color: white;
+            border: none;
+            font-weight: bold;
+            padding-top: 0.7rem;
+            padding-bottom: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: background 0.3s;
+        }
+        .stButton>button:hover {
+            background-color: #0d4231;
+            color: #FFD700; /* Gold text on hover */
+        }
+        
+        /* File Uploader */
+        .stFileUploader {
+            padding: 1.5rem;
+            border: 2px dashed #115740; /* Green dashed border */
+            border-radius: 4px;
+            background-color: #ffffff;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        /* Sidebar - Official Dark */
+        section[data-testid="stSidebar"] {
+            background-color: #06241b; /* Very Dark Green */
+            color: white;
+            padding-top: 1rem;
+            border-right: 5px solid #bd9b60; /* Gold border */
+        }
+        
+        section[data-testid="stSidebar"] h1 {
+            color: white !important;
+            text-align: left !important;
+            font-size: 1.2rem !important;
+            padding-left: 0.5rem;
+        }
+        
+        div[data-testid="stSidebarNav"] li div a {
+             color: #ffffff;
+             font-weight: normal;
+        }
+        div[data-testid="stSidebarNav"] li div a:hover {
+             color: #FFD700;
+        }
+
+        /* Images */
+        div[data-testid="stImage"] {
+            display: flex;
+            justify-content: center;
+        }
+        div[data-testid="stImage"] > img {
+            border: 1px solid #ddd;
+            padding: 5px;
+            background: white;
+        }
+
+        </style>
+    """, unsafe_allow_html=True)
+
+# --- UI Components ---
+def render_header():
+    """Renders the official Government of Pakistan header."""
+    logo_path = os.path.join(STATIC_DIR, "images", "pak_logo.png")
+>>>>>>> Stashed changes
     
     # Stage 5: Structured FIR
     fir_struct = format_fir(line_texts)
@@ -130,6 +291,7 @@ def predict(input_img, progress=gr.Progress()):
     
     return joined_text, overlay, gallery_items_final, gallery_items_final, [[i+1, t] for i, t in enumerate(line_texts)], fir_struct, status_msg
 
+<<<<<<< Updated upstream
 with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft()) as iface:
     gr.Markdown("# 🌙 Urdu OCR - UTRNet Visual Pipeline\nUpload FIR or any Urdu document to extract text with live processing feedback.")
     
@@ -140,6 +302,60 @@ with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft())
                 label="📄 Upload Document",
                 sources=["upload", "clipboard"],
                 height=500
+=======
+    # Right Column: Output
+    with col2:
+        st.markdown('<div class="custom-card"><h3>DIGITIZATION RESULTS</h3>', unsafe_allow_html=True)
+        
+        if st.session_state.processed:
+            st.success("Extraction Successful")
+            
+            # Display Gemini Extracted Fields (primary output)
+            st.markdown("<p style='font-size: 0.9rem; color: #115740; font-weight: bold;'>📋 EXTRACTED FIELDS</p>", unsafe_allow_html=True)
+            gemini_data = st.session_state.results.get('gemini_data', {})
+            
+            if gemini_data and not gemini_data.get('error'):
+                # Display main fields in a clean format
+                if gemini_data.get('serial_number'):
+                    st.markdown(f"**📌 Serial Number:** {gemini_data['serial_number']}")
+                if gemini_data.get('name_urdu') or gemini_data.get('name_english'):
+                    st.markdown(f"**👤 Name:** {gemini_data.get('name_urdu', '')}  —  {gemini_data.get('name_english', '')}")
+                if gemini_data.get('father_name_urdu') or gemini_data.get('father_name_english'):
+                    st.markdown(f"**👨 Father:** {gemini_data.get('father_name_urdu', '')}  —  {gemini_data.get('father_name_english', '')}")
+                if gemini_data.get('cnic'):
+                    st.markdown(f"**🪪 CNIC:** {gemini_data['cnic']}")
+                if gemini_data.get('date'):
+                    st.markdown(f"**📅 Date:** {gemini_data['date']}")
+                if gemini_data.get('address_urdu') or gemini_data.get('address_english'):
+                    st.markdown(f"**📍 Address:** {gemini_data.get('address_urdu', '')}  —  {gemini_data.get('address_english', '')}")
+                
+                # Display numbered fields
+                if gemini_data.get('fields'):
+                    st.markdown("---")
+                    st.markdown("**Numbered Fields:**")
+                    for field in gemini_data['fields']:
+                        num = field.get('number', '?')
+                        label = field.get('label', 'Field')
+                        val_u = field.get('value_urdu', '-')
+                        val_e = field.get('value_english', '-')
+                        st.markdown(f"**[{num}] {label}:** {val_u}  —  {val_e}")
+            else:
+                gemini_text = st.session_state.results.get('gemini_text', 'No fields extracted')
+                st.info(gemini_text)
+            
+            # Collapsible OCR raw text
+            with st.expander("📖 Raw OCR Text"):
+                result_text = st.session_state.results.get('text', '')
+                st.text_area("OCR Output", value=result_text, height=150, label_visibility="collapsed")
+            
+            # Download actions
+            st.download_button(
+                label="DOWNLOAD TRANSCRIPT",
+                data=st.session_state.results.get('text', ''),
+                file_name="official_transcript.txt",
+                mime="text/plain",
+                type="secondary"
+>>>>>>> Stashed changes
             )
             run_btn = gr.Button("▶️ Run OCR", size="lg", variant="primary")
             
@@ -172,11 +388,71 @@ with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft())
             interactive=False
         )
 
+<<<<<<< Updated upstream
     run_btn.click(
         fn=predict,
         inputs=inp,
         outputs=[recognized, det_img, gallery, gallery, line_table, struct, status_box]
     )
+=======
+    # Tabs for details
+    t1, t2, t3, t4 = st.tabs(["Detection", "Line Analysis", "Gemini Analysis", "Raw Data"])
+    
+    with t1:
+        st.image(st.session_state.results['overlay'], caption="YOLOv8 Line Detection", use_container_width=True)
+    
+    with t2:
+        crops = st.session_state.results['crops']
+        texts = st.session_state.results['line_texts']
+        st.write(f"Total Lines: {len(crops)}")
+        for i, (cr, tx) in enumerate(zip(crops, texts)):
+            c1, c2 = st.columns([1, 4])
+            with c1: st.image(cr)
+            with c2: st.code(tx, language=None)
+            st.divider()
+    
+    with t3:
+        st.markdown("### 🤖 Gemini 2.5 Flash - Extracted Fields")
+        gemini_data = st.session_state.results.get('gemini_data', {})
+        
+        if gemini_data and not gemini_data.get('error'):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("**Main Information**")
+                if gemini_data.get('serial_number'):
+                    st.info(f"📌 Serial: {gemini_data['serial_number']}")
+                if gemini_data.get('name_urdu') or gemini_data.get('name_english'):
+                    st.success(f"👤 {gemini_data.get('name_urdu', '')} | {gemini_data.get('name_english', '')}")
+                if gemini_data.get('cnic'):
+                    st.info(f"🪪 CNIC: {gemini_data['cnic']}")
+                if gemini_data.get('date'):
+                    st.info(f"📅 Date: {gemini_data['date']}")
+            
+            with col_b:
+                st.markdown("**Family & Address**")
+                if gemini_data.get('father_name_urdu') or gemini_data.get('father_name_english'):
+                    st.info(f"👨 Father: {gemini_data.get('father_name_urdu', '')} | {gemini_data.get('father_name_english', '')}")
+                if gemini_data.get('address_urdu') or gemini_data.get('address_english'):
+                    st.info(f"📍 {gemini_data.get('address_urdu', '')} | {gemini_data.get('address_english', '')}")
+            
+            # Numbered fields as expandable
+            if gemini_data.get('fields'):
+                st.markdown("---")
+                st.markdown("**All Numbered Fields**")
+                for field in gemini_data['fields']:
+                    with st.expander(f"Field [{field.get('number', '?')}] - {field.get('label', 'Field')}"):
+                        st.write(f"**Urdu:** {field.get('value_urdu', '-')}")
+                        st.write(f"**English:** {field.get('value_english', '-')}")
+            
+            # Show raw JSON
+            with st.expander("📦 Raw JSON Response"):
+                st.json(gemini_data)
+        else:
+            st.warning(st.session_state.results.get('gemini_text', 'No Gemini analysis available'))
+            
+    with t4:
+        st.json(st.session_state.results['json'])
+>>>>>>> Stashed changes
 
 if __name__ == "__main__":
     iface.launch()
