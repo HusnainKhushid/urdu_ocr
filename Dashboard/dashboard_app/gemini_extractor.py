@@ -9,8 +9,10 @@ import os
 import json
 import re
 
-# Configure API key from environment or default
-API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAwRo9tIiWscidSymTg8HZFma0A3rXGTDc")
+# Configure API key from environment variable
+API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if not API_KEY:
+    print("⚠️ Warning: GEMINI_API_KEY environment variable not set!")
 genai.configure(api_key=API_KEY)
 
 
