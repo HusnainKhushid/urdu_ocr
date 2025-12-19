@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import torch
 import streamlit as st
 from PIL import Image, ImageDraw
@@ -346,60 +347,133 @@ def render_ocr_view():
         st.markdown('<div class="custom-card"><h3>DIGITIZATION RESULTS</h3>', unsafe_allow_html=True)
         
         if st.session_state.processed:
-            st.success("Extraction Successful")
+            st.success("✅ FIR Extraction Successful")
             
-            # Display Gemini Extracted Fields (primary output)
-            st.markdown("<p style='font-size: 0.9rem; color: #115740; font-weight: bold;'>📋 EXTRACTED FIELDS</p>", unsafe_allow_html=True)
             gemini_data = st.session_state.results.get('gemini_data', {})
             
-            if gemini_data and not gemini_data.get('error'):
-                # Display main fields in a clean format
-                if gemini_data.get('serial_number'):
-                    st.markdown(f"**📌 Serial Number:** {gemini_data['serial_number']}")
-                if gemini_data.get('name_urdu') or gemini_data.get('name_english'):
-                    st.markdown(f"**👤 Name:** {gemini_data.get('name_urdu', '')}  —  {gemini_data.get('name_english', '')}")
-                if gemini_data.get('father_name_urdu') or gemini_data.get('father_name_english'):
-                    st.markdown(f"**👨 Father:** {gemini_data.get('father_name_urdu', '')}  —  {gemini_data.get('father_name_english', '')}")
-                if gemini_data.get('cnic'):
-                    st.markdown(f"**🪪 CNIC:** {gemini_data['cnic']}")
-                if gemini_data.get('date'):
-                    st.markdown(f"**📅 Date:** {gemini_data['date']}")
-                if gemini_data.get('address_urdu') or gemini_data.get('address_english'):
-                    st.markdown(f"**📍 Address:** {gemini_data.get('address_urdu', '')}  —  {gemini_data.get('address_english', '')}")
+            if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
+                # === FIR HEADER ===
+                header = gemini_data.get('header', {})
+                if header:
+                    st.markdown("### 📋 FIR HEADER")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.markdown(f"**Serial No:** {header.get('serial_number', '-')}")
+                        st.markdown(f"**FIR No:** {header.get('fir_number', '-')}")
+                        st.markdown(f"**District:** {header.get('district', '-')}")
+                    with col_b:
+                        st.markdown(f"**Police Station:** {header.get('police_station', '-')}")
+                        st.markdown(f"**Date/Time:** {header.get('date_time_occurrence', '-')}")
                 
-                # Display numbered fields
-                if gemini_data.get('fields'):
-                    st.markdown("---")
-                    st.markdown("**Numbered Fields:**")
-                    for field in gemini_data['fields']:
+                st.markdown("---")
+                
+                # === COMPLAINANT ===
+                complainant = gemini_data.get('complainant', {})
+                if complainant:
+                    st.markdown("### 👤 COMPLAINANT / مستغیث")
+                    st.markdown(f"**Name:** {complainant.get('name_urdu', '')} — {complainant.get('name_english', '')}")
+                    if complainant.get('father_name'):
+                        st.markdown(f"**Father:** {complainant.get('father_name', '-')}")
+                    if complainant.get('cnic'):
+                        st.markdown(f"**CNIC:** {complainant.get('cnic', '-')}")
+                    if complainant.get('phone'):
+                        st.markdown(f"**Phone:** {complainant.get('phone', '-')}")
+                    if complainant.get('address_english') or complainant.get('address_urdu'):
+                        st.markdown(f"**Address:** {complainant.get('address_english', complainant.get('address_urdu', '-'))}")
+                
+                st.markdown("---")
+                
+                # === CRIME DETAILS ===
+                crime = gemini_data.get('crime', {})
+                if crime:
+                    st.markdown("### ⚖️ CRIME DETAILS / جرم")
+                    sections = crime.get('sections', [])
+                    if sections:
+                        st.markdown(f"**PPC Sections:** {', '.join(str(s) for s in sections)}")
+                    st.markdown(f"**Type:** {crime.get('type_urdu', '')} — {crime.get('type_english', '-')}")
+                    if crime.get('stolen_property'):
+                        st.markdown(f"**Stolen Property:** {crime.get('stolen_property')}")
+                    if crime.get('value_rupees'):
+                        st.markdown(f"**Value:** Rs. {crime.get('value_rupees')}")
+                
+                st.markdown("---")
+                
+                # === FIR FIELDS TABLE ===
+                fields = gemini_data.get('fields', [])
+                if fields:
+                    st.markdown("### 📝 FIR FIELDS")
+                    for field in fields:
                         num = field.get('number', '?')
-                        label = field.get('label', 'Field')
+                        label_e = field.get('label_english', 'Field')
+                        label_u = field.get('label_urdu', '')
                         val_u = field.get('value_urdu', '-')
                         val_e = field.get('value_english', '-')
-                        st.markdown(f"**[{num}] {label}:** {val_u}  —  {val_e}")
+                        
+                        with st.expander(f"[{num}] {label_e}"):
+                            st.markdown(f"**{label_u}**")
+                            st.markdown(f"**اردو:** {val_u}")
+                            st.markdown(f"**English:** {val_e}")
+                
+                st.markdown("---")
+                
+                # === NARRATIVE ===
+                narrative = gemini_data.get('narrative', {})
+                if narrative:
+                    st.markdown("### 📜 FIR NARRATIVE / بیان")
+                    if narrative.get('english'):
+                        st.markdown("**English Translation:**")
+                        st.info(narrative.get('english', '-'))
+                    if narrative.get('urdu'):
+                        with st.expander("📖 Original Urdu Text"):
+                            st.markdown(narrative.get('urdu', '-'))
+                
+                # === OFFICER ===
+                officer = gemini_data.get('officer', {})
+                if officer and officer.get('name'):
+                    st.markdown("---")
+                    st.markdown("### 👮 RECORDING OFFICER")
+                    st.markdown(f"**{officer.get('rank', 'Officer')} {officer.get('name', '-')}**")
+                    if officer.get('badge_number'):
+                        st.markdown(f"Badge: {officer.get('badge_number')}")
+                    if officer.get('signature_date'):
+                        st.markdown(f"Date: {officer.get('signature_date')}")
+                
             else:
-                gemini_text = st.session_state.results.get('gemini_text', 'No fields extracted')
-                st.info(gemini_text)
+                # Error or no data
+                error_msg = gemini_data.get('error', gemini_data.get('raw_response', 'No fields extracted'))
+                st.warning(f"⚠️ {error_msg}")
             
-            # Collapsible OCR raw text
-            with st.expander("📖 Raw OCR Text"):
+            st.markdown("---")
+            
+            # === RAW OCR OUTPUT ===
+            with st.expander("📖 Raw UTRNet OCR Output (All Lines)", expanded=False):
                 result_text = st.session_state.results.get('text', '')
-                st.text_area("OCR Output", value=result_text, height=150, label_visibility="collapsed")
+                st.text_area("Complete OCR Output", value=result_text, height=300, label_visibility="collapsed")
             
-            # Download actions
-            st.download_button(
-                label="DOWNLOAD TRANSCRIPT",
-                data=st.session_state.results.get('text', ''),
-                file_name="official_transcript.txt",
-                mime="text/plain",
-                type="secondary"
-            )
+            # Download buttons
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="📥 Download OCR Text",
+                    data=st.session_state.results.get('text', ''),
+                    file_name="fir_ocr_output.txt",
+                    mime="text/plain"
+                )
+            with col_dl2:
+                # Download FIR JSON
+                fir_json = json.dumps(gemini_data, ensure_ascii=False, indent=2)
+                st.download_button(
+                    label="📥 Download FIR JSON",
+                    data=fir_json,
+                    file_name="fir_extracted.json",
+                    mime="application/json"
+                )
         else:
             # Empty state
             st.markdown("""
                 <div style='text-align: center; color: #6b7280; padding: 4rem 0;'>
                     <p style='font-weight: bold;'>NO DATA GENERATED</p>
-                    <p style='font-size: 0.8rem;'>Upload a document to generate an official record.</p>
+                    <p style='font-size: 0.8rem;'>Upload a FIR document to extract and translate.</p>
                 </div>
             """, unsafe_allow_html=True)
             
@@ -436,43 +510,68 @@ def render_pipeline_view():
             st.divider()
     
     with t3:
-        st.markdown("### 🤖 Gemini 2.5 Flash - Extracted Fields")
+        st.markdown("### 🤖 Gemini 2.5 Flash - FIR Extraction")
         gemini_data = st.session_state.results.get('gemini_data', {})
         
-        if gemini_data and not gemini_data.get('error'):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown("**Main Information**")
-                if gemini_data.get('serial_number'):
-                    st.info(f"📌 Serial: {gemini_data['serial_number']}")
-                if gemini_data.get('name_urdu') or gemini_data.get('name_english'):
-                    st.success(f"👤 {gemini_data.get('name_urdu', '')} | {gemini_data.get('name_english', '')}")
-                if gemini_data.get('cnic'):
-                    st.info(f"🪪 CNIC: {gemini_data['cnic']}")
-                if gemini_data.get('date'):
-                    st.info(f"📅 Date: {gemini_data['date']}")
+        if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
+            # Header Info
+            header = gemini_data.get('header', {})
+            if header:
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.info(f"📌 Serial: {header.get('serial_number', '-')}")
+                    st.info(f"📋 FIR No: {header.get('fir_number', '-')}")
+                with col_b:
+                    st.info(f"🏛️ PS: {header.get('police_station', '-')}")
+                    st.info(f"📅 Date: {header.get('date_time_occurrence', '-')}")
             
-            with col_b:
-                st.markdown("**Family & Address**")
-                if gemini_data.get('father_name_urdu') or gemini_data.get('father_name_english'):
-                    st.info(f"👨 Father: {gemini_data.get('father_name_urdu', '')} | {gemini_data.get('father_name_english', '')}")
-                if gemini_data.get('address_urdu') or gemini_data.get('address_english'):
-                    st.info(f"📍 {gemini_data.get('address_urdu', '')} | {gemini_data.get('address_english', '')}")
-            
-            # Numbered fields as expandable
-            if gemini_data.get('fields'):
+            # Complainant
+            complainant = gemini_data.get('complainant', {})
+            if complainant:
                 st.markdown("---")
-                st.markdown("**All Numbered Fields**")
-                for field in gemini_data['fields']:
-                    with st.expander(f"Field [{field.get('number', '?')}] - {field.get('label', 'Field')}"):
-                        st.write(f"**Urdu:** {field.get('value_urdu', '-')}")
-                        st.write(f"**English:** {field.get('value_english', '-')}")
+                st.markdown("**Complainant / مستغیث**")
+                st.success(f"👤 {complainant.get('name_urdu', '')} | {complainant.get('name_english', '')}")
+                if complainant.get('cnic'):
+                    st.info(f"🪪 CNIC: {complainant['cnic']}")
+                if complainant.get('phone'):
+                    st.info(f"📞 Phone: {complainant['phone']}")
             
-            # Show raw JSON
+            # Crime
+            crime = gemini_data.get('crime', {})
+            if crime:
+                st.markdown("---")
+                st.markdown("**Crime Details / جرم**")
+                sections = crime.get('sections', [])
+                if sections:
+                    st.error(f"⚖️ Sections: {', '.join(str(s) for s in sections)}")
+                st.warning(f"🔍 Type: {crime.get('type_urdu', '')} — {crime.get('type_english', '')}")
+            
+            # Narrative
+            narrative = gemini_data.get('narrative', {})
+            if narrative:
+                st.markdown("---")
+                st.markdown("**FIR Statement / بیان**")
+                with st.expander("📜 English Translation", expanded=True):
+                    st.write(narrative.get('english', '-'))
+                with st.expander("📜 Original Urdu"):
+                    st.write(narrative.get('urdu', '-'))
+            
+            # All fields
+            fields = gemini_data.get('fields', [])
+            if fields:
+                st.markdown("---")
+                st.markdown("**All FIR Fields**")
+                for field in fields:
+                    with st.expander(f"[{field.get('number', '?')}] {field.get('label_english', 'Field')}"):
+                        st.markdown(f"**{field.get('label_urdu', '')}**")
+                        st.write(f"اردو: {field.get('value_urdu', '-')}")
+                        st.write(f"English: {field.get('value_english', '-')}")
+            
+            # Raw JSON
             with st.expander("📦 Raw JSON Response"):
                 st.json(gemini_data)
         else:
-            st.warning(st.session_state.results.get('gemini_text', 'No Gemini analysis available'))
+            st.warning(gemini_data.get('error', gemini_data.get('raw_response', 'No Gemini analysis available')))
             
     with t4:
         st.json(st.session_state.results['json'])
