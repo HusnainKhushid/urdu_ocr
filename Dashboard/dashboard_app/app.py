@@ -268,6 +268,27 @@ def inject_custom_css():
         div[data-testid="stSidebarNav"] li div a:hover {
              color: #FFD700;
         }
+        
+        /* Sidebar Radio Buttons - White Text */
+        section[data-testid="stSidebar"] .stRadio label {
+            color: white !important;
+        }
+        section[data-testid="stSidebar"] .stRadio p {
+            color: white !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+            color: white !important;
+        }
+        
+        /* Download Buttons - White Text */
+        .stDownloadButton button {
+            color: white !important;
+            background-color: #115740 !important;
+        }
+        .stDownloadButton button:hover {
+            color: #FFD700 !important;
+            background-color: #0d4231 !important;
+        }
 
         /* Images */
         div[data-testid="stImage"] {
