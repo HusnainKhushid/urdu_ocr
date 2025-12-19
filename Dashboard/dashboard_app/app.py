@@ -331,174 +331,193 @@ def render_ocr_view():
     inject_custom_css()
     render_header()
     
-    # Main Layout: Two Columns
-    col1, col2 = st.columns([1, 1], gap="large")
+    # === UPLOAD SECTION (Centered, Top) ===
+    st.markdown("---")
     
-    # Left Column: Input
-    with col1:
-        st.markdown('<div class="custom-card"><h3>INPUT DOCUMENT</h3>', unsafe_allow_html=True)
-        st.markdown("<p style='font-size: 0.9rem; color: #666;'>Upload official correspondence or gazettes (JPEG/PNG)</p>", unsafe_allow_html=True)
+    # Center the upload area
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    
+    with col_center:
+        st.markdown('<div class="custom-card"><h3>📤 UPLOAD FIR DOCUMENT</h3>', unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 0.9rem; color: #666;'>Upload Police Form 24.5 / FIR Document (JPEG/PNG)</p>", unsafe_allow_html=True)
         
         # Upload Logic
         uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"], key="uploader_ocr", label_visibility="collapsed")
         
         if uploaded_file:
-            # Check if new file
             if uploaded_file.file_id != st.session_state.uploaded_file_id:
                 image = Image.open(uploaded_file).convert("RGB")
                 st.session_state.input_image = image
                 st.session_state.uploaded_file_id = uploaded_file.file_id
-                st.session_state.processed = False # Reset processing
+                st.session_state.processed = False
         
         if st.session_state.input_image:
             st.image(st.session_state.input_image, caption="Document Preview", use_container_width=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("PROCESS DOCUMENT", type="primary"):
-                with st.spinner("Authenticating and extracting text..."):
+            if st.button("🔍 PROCESS DOCUMENT", type="primary", use_container_width=True):
+                with st.spinner("Extracting and translating FIR..."):
                     run_pipeline(st.session_state.input_image)
                 st.rerun()
         else:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            st.info("System Ready. Awaiting Input.")
+            st.info("📋 System Ready. Upload a FIR document to begin.")
             
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # Right Column: Output
-    with col2:
-        st.markdown('<div class="custom-card"><h3>DIGITIZATION RESULTS</h3>', unsafe_allow_html=True)
+    
+    # === RESULTS SECTION (Full Width, Below) ===
+    if st.session_state.processed:
+        st.markdown("---")
+        st.markdown("## 📋 DIGITIZATION RESULTS")
+        st.success("✅ FIR Extraction Successful")
         
-        if st.session_state.processed:
-            st.success("✅ FIR Extraction Successful")
+        gemini_data = st.session_state.results.get('gemini_data', {})
+        
+        if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
             
-            gemini_data = st.session_state.results.get('gemini_data', {})
+            # === ROW 1: Header & Complainant (Side by Side) ===
+            col1, col2 = st.columns(2, gap="large")
             
-            if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
-                # === FIR HEADER ===
+            with col1:
                 header = gemini_data.get('header', {})
                 if header:
                     st.markdown("### 📋 FIR HEADER")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        st.markdown(f"**Serial No:** {header.get('serial_number', '-')}")
-                        st.markdown(f"**FIR No:** {header.get('fir_number', '-')}")
-                        st.markdown(f"**District:** {header.get('district', '-')}")
-                    with col_b:
-                        st.markdown(f"**Police Station:** {header.get('police_station', '-')}")
-                        st.markdown(f"**Date/Time:** {header.get('date_time_occurrence', '-')}")
-                
-                st.markdown("---")
-                
-                # === COMPLAINANT ===
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Serial No** | {header.get('serial_number', '-')} |
+                    | **FIR No** | {header.get('fir_number', '-')} |
+                    | **Police Station** | {header.get('police_station', '-')} |
+                    | **District** | {header.get('district', '-')} |
+                    | **Date/Time** | {header.get('date_time_occurrence', '-')} |
+                    """)
+            
+            with col2:
                 complainant = gemini_data.get('complainant', {})
                 if complainant:
                     st.markdown("### 👤 COMPLAINANT / مستغیث")
-                    st.markdown(f"**Name:** {complainant.get('name_urdu', '')} — {complainant.get('name_english', '')}")
-                    if complainant.get('father_name'):
-                        st.markdown(f"**Father:** {complainant.get('father_name', '-')}")
-                    if complainant.get('cnic'):
-                        st.markdown(f"**CNIC:** {complainant.get('cnic', '-')}")
-                    if complainant.get('phone'):
-                        st.markdown(f"**Phone:** {complainant.get('phone', '-')}")
-                    if complainant.get('address_english') or complainant.get('address_urdu'):
-                        st.markdown(f"**Address:** {complainant.get('address_english', complainant.get('address_urdu', '-'))}")
-                
-                st.markdown("---")
-                
-                # === CRIME DETAILS ===
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Name (Urdu)** | {complainant.get('name_urdu', '-')} |
+                    | **Name (English)** | {complainant.get('name_english', '-')} |
+                    | **Father** | {complainant.get('father_name', '-')} |
+                    | **CNIC** | {complainant.get('cnic', '-')} |
+                    | **Phone** | {complainant.get('phone', '-')} |
+                    | **Address** | {complainant.get('address_english', complainant.get('address_urdu', '-'))} |
+                    """)
+            
+            st.markdown("---")
+            
+            # === ROW 2: Crime & Officer (Side by Side) ===
+            col3, col4 = st.columns(2, gap="large")
+            
+            with col3:
                 crime = gemini_data.get('crime', {})
                 if crime:
                     st.markdown("### ⚖️ CRIME DETAILS / جرم")
                     sections = crime.get('sections', [])
-                    if sections:
-                        st.markdown(f"**PPC Sections:** {', '.join(str(s) for s in sections)}")
-                    st.markdown(f"**Type:** {crime.get('type_urdu', '')} — {crime.get('type_english', '-')}")
-                    if crime.get('stolen_property'):
-                        st.markdown(f"**Stolen Property:** {crime.get('stolen_property')}")
-                    if crime.get('value_rupees'):
-                        st.markdown(f"**Value:** Rs. {crime.get('value_rupees')}")
-                
-                st.markdown("---")
-                
-                # === FIR FIELDS TABLE ===
-                fields = gemini_data.get('fields', [])
-                if fields:
-                    st.markdown("### 📝 FIR FIELDS")
-                    for field in fields:
-                        num = field.get('number', '?')
-                        label_e = field.get('label_english', 'Field')
-                        label_u = field.get('label_urdu', '')
-                        val_u = field.get('value_urdu', '-')
-                        val_e = field.get('value_english', '-')
-                        
-                        with st.expander(f"[{num}] {label_e}"):
-                            st.markdown(f"**{label_u}**")
-                            st.markdown(f"**اردو:** {val_u}")
-                            st.markdown(f"**English:** {val_e}")
-                
-                st.markdown("---")
-                
-                # === NARRATIVE ===
-                narrative = gemini_data.get('narrative', {})
-                if narrative:
-                    st.markdown("### 📜 FIR NARRATIVE / بیان")
-                    if narrative.get('english'):
-                        st.markdown("**English Translation:**")
-                        st.info(narrative.get('english', '-'))
-                    if narrative.get('urdu'):
-                        with st.expander("📖 Original Urdu Text"):
-                            st.markdown(narrative.get('urdu', '-'))
-                
-                # === OFFICER ===
+                    sections_str = ', '.join(str(s) for s in sections) if sections else '-'
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **PPC Sections** | {sections_str} |
+                    | **Type (Urdu)** | {crime.get('type_urdu', '-')} |
+                    | **Type (English)** | {crime.get('type_english', '-')} |
+                    | **Stolen Property** | {crime.get('stolen_property', '-')} |
+                    | **Value** | Rs. {crime.get('value_rupees', '-')} |
+                    """)
+            
+            with col4:
                 officer = gemini_data.get('officer', {})
-                if officer and officer.get('name'):
-                    st.markdown("---")
+                if officer:
                     st.markdown("### 👮 RECORDING OFFICER")
-                    st.markdown(f"**{officer.get('rank', 'Officer')} {officer.get('name', '-')}**")
-                    if officer.get('badge_number'):
-                        st.markdown(f"Badge: {officer.get('badge_number')}")
-                    if officer.get('signature_date'):
-                        st.markdown(f"Date: {officer.get('signature_date')}")
-                
-            else:
-                # Error or no data
-                error_msg = gemini_data.get('error', gemini_data.get('raw_response', 'No fields extracted'))
-                st.warning(f"⚠️ {error_msg}")
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Name** | {officer.get('name', '-')} |
+                    | **Rank** | {officer.get('rank', '-')} |
+                    | **Badge No** | {officer.get('badge_number', '-')} |
+                    | **Phone** | {officer.get('phone', '-')} |
+                    | **Date** | {officer.get('signature_date', '-')} |
+                    """)
             
             st.markdown("---")
             
-            # === RAW OCR OUTPUT ===
-            with st.expander("📖 Raw UTRNet OCR Output (All Lines)", expanded=False):
-                result_text = st.session_state.results.get('text', '')
-                st.text_area("Complete OCR Output", value=result_text, height=300, label_visibility="collapsed")
+            # === ROW 3: FIR Narrative (Full Width) ===
+            narrative = gemini_data.get('narrative', {})
+            if narrative:
+                st.markdown("### 📜 FIR NARRATIVE / بیان")
+                
+                tab1, tab2 = st.tabs(["🇬🇧 English Translation", "اردو Original Urdu"])
+                
+                with tab1:
+                    st.markdown(f"""
+                    <div style='background: #f0f9f4; padding: 20px; border-radius: 8px; border-left: 4px solid #115740;'>
+                        <p style='color: #1a1a1a; line-height: 1.8;'>{narrative.get('english', 'No translation available')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with tab2:
+                    st.markdown(f"""
+                    <div style='background: #fff9e6; padding: 20px; border-radius: 8px; border-right: 4px solid #bd9b60; direction: rtl; text-align: right;'>
+                        <p style='color: #1a1a1a; line-height: 2; font-size: 1.1rem;'>{narrative.get('urdu', 'متن دستیاب نہیں')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
             
-            # Download buttons
-            col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
+            st.markdown("---")
+            
+            # === ROW 4: FIR Fields (Expandable) ===
+            fields = gemini_data.get('fields', [])
+            if fields:
+                st.markdown("### 📝 FIR FORM FIELDS (6 Sections)")
+                
+                # Display fields in 2 columns
+                col_f1, col_f2 = st.columns(2)
+                
+                for i, field in enumerate(fields):
+                    num = field.get('number', '?')
+                    label_e = field.get('label_english', 'Field')
+                    label_u = field.get('label_urdu', '')
+                    val_u = field.get('value_urdu', '-')
+                    val_e = field.get('value_english', '-')
+                    
+                    target_col = col_f1 if i % 2 == 0 else col_f2
+                    with target_col:
+                        with st.expander(f"**[{num}]** {label_e}"):
+                            st.caption(label_u)
+                            st.markdown(f"**اردو:** {val_u}")
+                            st.markdown(f"**English:** {val_e}")
+            
+            st.markdown("---")
+            
+            # === ROW 5: Downloads & Raw OCR ===
+            col_d1, col_d2, col_d3 = st.columns([1, 1, 1])
+            
+            with col_d1:
+                with st.expander("📖 Raw UTRNet OCR Output"):
+                    result_text = st.session_state.results.get('text', '')
+                    st.text_area("OCR", value=result_text, height=200, label_visibility="collapsed")
+            
+            with col_d2:
                 st.download_button(
                     label="📥 Download OCR Text",
                     data=st.session_state.results.get('text', ''),
                     file_name="fir_ocr_output.txt",
-                    mime="text/plain"
+                    mime="text/plain",
+                    use_container_width=True
                 )
-            with col_dl2:
-                # Download FIR JSON
+            
+            with col_d3:
                 fir_json = json.dumps(gemini_data, ensure_ascii=False, indent=2)
                 st.download_button(
                     label="📥 Download FIR JSON",
                     data=fir_json,
                     file_name="fir_extracted.json",
-                    mime="application/json"
+                    mime="application/json",
+                    use_container_width=True
                 )
+                
         else:
-            # Empty state
-            st.markdown("""
-                <div style='text-align: center; color: #6b7280; padding: 4rem 0;'>
-                    <p style='font-weight: bold;'>NO DATA GENERATED</p>
-                    <p style='font-size: 0.8rem;'>Upload a FIR document to extract and translate.</p>
-                </div>
-            """, unsafe_allow_html=True)
-            
-        st.markdown('</div>', unsafe_allow_html=True)
+            error_msg = gemini_data.get('error', gemini_data.get('raw_response', 'No fields extracted'))
+            st.warning(f"⚠️ {error_msg}")
 
 def render_pipeline_view():
     st.header("Pipeline Overview")
