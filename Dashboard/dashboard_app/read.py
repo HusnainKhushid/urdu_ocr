@@ -3,7 +3,11 @@ import math
 import torch
 from PIL import Image
 import torch.utils.data
-from .utils import NormalizePAD
+
+try:
+    from .utils import NormalizePAD
+except ImportError:
+    from utils import NormalizePAD
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)

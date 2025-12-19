@@ -1,121 +1,120 @@
 import os
-import json
+import sys
+import time
 import torch
-import gradio as gr
+import streamlit as st
+from PIL import Image, ImageDraw
+import numpy as np
 from ultralytics import YOLO
-from PIL import ImageDraw
 
-from .read import text_recognizer
-from .model import Model
-from .utils import CTCLabelConverter
+# Add current directory to path to allow imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
-from .gemini_extractor import extract_fields_from_image, format_fields_for_display
+try:
+    from read import text_recognizer
+    from model import Model
+    from utils import CTCLabelConverter
+    from gemini_extractor import extract_fields_from_image, format_fields_for_display
+except ImportError as e:
+    st.error(f"Error importing modules: {e}. Make sure read.py, model.py, and utils.py are in the same directory.")
+    st.stop()
 
+# --- Configuration ---
+st.set_page_config(
+    page_title="Urdu OCR - UTRNet",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Add the parent directory to the Python path
+# --- Path Setup ---
+BASE_DIR = os.path.dirname(current_dir) # dashboard/
+PROJECT_ROOT = os.path.dirname(BASE_DIR) # Projects/ML/
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
+# --- Session State Initialization ---
+if 'processed' not in st.session_state:
+    st.session_state.processed = False
+if 'results' not in st.session_state:
+    st.session_state.results = {}
+if 'input_image' not in st.session_state:
+    st.session_state.input_image = None
+if 'uploaded_file_id' not in st.session_state:
+    st.session_state.uploaded_file_id = None
 
-""" vocab / character number configuration """
-file = open(os.path.join(PROJECT_ROOT, "data", "UrduGlyphs.txt"),"r",encoding="utf-8")
-content = file.readlines()
-content = ''.join([str(elem).strip('\n') for elem in content])
-content = content+" "
-""" model configuration """
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-converter = CTCLabelConverter(content)
-recognition_model = Model(num_class=len(converter.character), device=device)
-recognition_model = recognition_model.to(device)
-recognition_model.load_state_dict(torch.load(os.path.join(PROJECT_ROOT, "models", "best_norm_ED.pth"), map_location=device))
-recognition_model.eval()
-
-detection_model = YOLO(os.path.join(PROJECT_ROOT, "models", "yolov8m_UrduDoc.pt"))
-
-examples = [os.path.join(BASE_DIR, "static", "images", name) for name in ["1.jpg", "2.jpg", "3.jpg"] if os.path.exists(os.path.join(BASE_DIR, "static", "images", name))]
-
-def format_fir(lines):
-    """Lightweight FIR formatter: groups line-wise OCR into numbered sections."""
-    sections = []
-    for idx, text in enumerate(lines, start=1):
-        sections.append({"section": f"Line {idx}", "text": text})
-    return {"status": "draft", "lines": sections}
-
-def predict(input_img, progress=gr.Progress()):
-    """Full pipeline with visual stages and simple FIR formatting."""
-    import time
+# --- Resource Loading ---
+@st.cache_resource
+def load_resources():
+    """Load models and converters once."""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    if input_img is None:
-        return "", None, None, [], [[]], {}, "❌ No image provided"
+    # 1. Load Vocabulary
+    vocab_path = os.path.join(DATA_DIR, "UrduGlyphs.txt")
+    if not os.path.exists(vocab_path):
+        st.error(f"Vocabulary file not found at: {vocab_path}")
+        return None, None, None, None
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        content = f.readlines()
+    content = ''.join([str(elem).strip('\n') for elem in content])
+    content = content + " "
+    converter = CTCLabelConverter(content)
     
-    status_msg = ""
-    print(f"Device: {device} | GPU Available: {torch.cuda.is_available()}")
+    # 2. Recognition Model
+    recognition_model = Model(num_class=len(converter.character), device=device)
+    recognition_model = recognition_model.to(device)
+    rec_weights = os.path.join(MODELS_DIR, "best_norm_ED.pth")
+    if os.path.exists(rec_weights):
+        recognition_model.load_state_dict(torch.load(rec_weights, map_location=device))
+        recognition_model.eval()
     
-    # Stage 1: Detection (ultra-aggressive)
-    progress(0, desc="🔍 Detecting text lines...")
-    status_msg += "🔍 Stage 1: Detecting text lines...\n"
+    # 3. Detection Model
+    det_weights = os.path.join(MODELS_DIR, "yolov8m_UrduDoc.pt")
+    detection_model = YOLO(det_weights) if os.path.exists(det_weights) else None
+
+    return recognition_model, detection_model, converter, device
+
+rec_model, det_model, converter, device = load_resources()
+if not (rec_model and det_model):
+    st.stop()
+
+# --- Logic ---
+def run_pipeline(image):
+    """Run OCR and store results in session state."""
+    # Simplified status: handled by caller with spinner
+    
     start = time.time()
-    detection_results = detection_model.predict(
-        source=input_img, 
-        conf=0.01,  # Ultra-low confidence to catch everything
-        imgsz=1280,  # Maximum size for best detection
-        save=False, 
-        agnostic_nms=True,  # Class-agnostic NMS
-        max_det=300,  # Allow up to 300 detections
-        device=device,
-        verbose=False
-    )
-    elapsed = time.time()-start
     
-    bounding_boxes = detection_results[0].boxes.xyxy.cpu().numpy().tolist()
-    bounding_boxes.sort(key=lambda x: x[1])
-    status_msg += f"   ✓ Found {len(bounding_boxes)} lines in {elapsed:.2f}s\n"
-    print(status_msg)
+    # 1. Detection
+    # status_container.write("🔍 Detecting lines...")
+    results = det_model.predict(image, conf=0.01, imgsz=1280, agnostic_nms=True, max_det=300, verbose=False, device=device)
+    boxes = results[0].boxes.xyxy.cpu().numpy().tolist()
+    boxes.sort(key=lambda x: x[1])
+    # status_container.write(f"   ✓ Found {len(boxes)} lines")
     
-    progress(0.2, desc=f"🎨 Drawing boxes on {len(bounding_boxes)} lines...")
-    
-    # Stage 2: Overlay visualization
-    overlay = input_img.copy()
+    # 2. Vis & Crop
+    overlay = image.copy()
     draw = ImageDraw.Draw(overlay)
-    from numpy import random
-    for i, box in enumerate(bounding_boxes):
-        color = tuple(random.randint(50, 255, 3))
+    crops = []
+    for i, box in enumerate(boxes):
+        color = tuple(np.random.randint(50, 255, 3))
         draw.rectangle(box, outline=color, width=4)
-        draw.text((box[0] + 5, box[1] + 5), str(i + 1), fill=color)
-    status_msg += "   ✓ Overlay created\n"
+        draw.text((box[0]+5, box[1]+5), str(i+1), fill=(0, 0, 0))  # Black text
+        crops.append(image.crop(box))
     
-    progress(0.3, desc="✂️ Cropping lines...")
-    
-    # Stage 3: Crops
-    cropped_images = [input_img.crop(box) for box in bounding_boxes]
-    status_msg += f"   ✓ Cropped {len(cropped_images)} lines\n"
-    
-    # Prep early gallery for visual feedback
-    gallery_items = [(img, f"Line {idx}") for idx, img in enumerate(cropped_images, 1)]
-    
-    progress(0.4, desc="📖 Running OCR...")
-    
-    # Stage 4: OCR per crop
-    line_texts = []
-    start = time.time()
-    for idx, img in enumerate(cropped_images, 1):
-        progress(0.4 + (0.5 * idx / len(cropped_images)), desc=f"📖 OCR Line {idx}/{len(cropped_images)}...")
+    # 3. OCR
+    # status_container.write("📖 Reading text...")
+    ocr_texts = []
+    # prog = status_container.progress(0)
+    for idx, crop in enumerate(crops):
         try:
-            text = text_recognizer(img, recognition_model, converter, device)
-            line_texts.append(text)
-            print(f"   Line {idx}: {text[:60]}")
-        except Exception as e:
-            print(f"   Line {idx}: ERROR - {e}")
-            line_texts.append("[ERROR]")
+            txt = text_recognizer(crop, rec_model, converter, device)
+            ocr_texts.append(txt)
+        except:
+            ocr_texts.append("")
+        # prog.progress((idx+1)/len(crops))
     
-<<<<<<< Updated upstream
-    elapsed = time.time()-start
-    status_msg += f"   ✓ OCR completed in {elapsed:.2f}s\n"
-
-    joined_text = "\n".join(line_texts)
-    
-    progress(0.95, desc="📋 Formatting FIR...")
-=======
     # 4. Gemini Field Extraction (prints to terminal)
     print("\n" + "=" * 60)
     print("📤 Sending image to Gemini for field extraction...")
@@ -173,6 +172,21 @@ def inject_custom_css():
             display: flex;
             flex-direction: column;
             align-items: center;
+        }
+        
+        /* Force dark text color for all markdown content */
+        .custom-card p, .custom-card span, .custom-card div {
+            color: #1a1a1a !important;
+        }
+        
+        /* Markdown text styling */
+        .stMarkdown, .stMarkdown p, .stMarkdown span {
+            color: #1a1a1a !important;
+        }
+        
+        /* Ensure all text elements are visible */
+        [data-testid="stMarkdownContainer"] p {
+            color: #1a1a1a !important;
         }
 
         /* Headers */
@@ -272,37 +286,61 @@ def inject_custom_css():
 def render_header():
     """Renders the official Government of Pakistan header."""
     logo_path = os.path.join(STATIC_DIR, "images", "pak_logo.png")
->>>>>>> Stashed changes
     
-    # Stage 5: Structured FIR
-    fir_struct = format_fir(line_texts)
-    status_msg += "   ✓ FIR formatted\n"
+    col_l, col_m, col_r = st.columns([1, 6, 1])
+    with col_l:
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=100)
+    with col_m:
+        st.markdown("""
+            <div style='text-align: center;'>
+                <h4 style='margin-bottom: 0; color: #115740;'>GOVERNMENT OF PAKISTAN</h4>
+                <h3 style='margin-top: 0; margin-bottom: 5px; font-size: 1.2rem; color: #1a1a1a;'>MINISTRY OF INFORMATION TECHNOLOGY & TELECOMMUNICATION</h3>
+                <h1 style='font-size: 2.5rem; margin-top: 10px;'>OFFICIAL DOCUMENT DIGITIZATION PORTAL</h1>
+            </div>
+        """, unsafe_allow_html=True)
+    with col_r:
+         if os.path.exists(logo_path):
+            st.image(logo_path, width=100)
+            
+    st.markdown("<hr style='border-top: 3px solid #bd9b60; margin-top: 0;'>", unsafe_allow_html=True)
 
-    # Update gallery with OCR text
-    gallery_items_final = []
-    for idx, img in enumerate(cropped_images, start=1):
-        txt = line_texts[idx-1] if idx-1 < len(line_texts) else ''
-        gallery_items_final.append((img, f"L{idx}: {txt[:80]}"))
+def render_ocr_view():
+    inject_custom_css()
+    render_header()
     
-    status_msg += "✅ DONE! All stages completed.\n"
-    print(status_msg)
+    # Main Layout: Two Columns
+    col1, col2 = st.columns([1, 1], gap="large")
     
-    progress(1.0, desc="✅ Complete!")
-    
-    return joined_text, overlay, gallery_items_final, gallery_items_final, [[i+1, t] for i, t in enumerate(line_texts)], fir_struct, status_msg
+    # Left Column: Input
+    with col1:
+        st.markdown('<div class="custom-card"><h3>INPUT DOCUMENT</h3>', unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 0.9rem; color: #666;'>Upload official correspondence or gazettes (JPEG/PNG)</p>", unsafe_allow_html=True)
+        
+        # Upload Logic
+        uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"], key="uploader_ocr", label_visibility="collapsed")
+        
+        if uploaded_file:
+            # Check if new file
+            if uploaded_file.file_id != st.session_state.uploaded_file_id:
+                image = Image.open(uploaded_file).convert("RGB")
+                st.session_state.input_image = image
+                st.session_state.uploaded_file_id = uploaded_file.file_id
+                st.session_state.processed = False # Reset processing
+        
+        if st.session_state.input_image:
+            st.image(st.session_state.input_image, caption="Document Preview", use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("PROCESS DOCUMENT", type="primary"):
+                with st.spinner("Authenticating and extracting text..."):
+                    run_pipeline(st.session_state.input_image)
+                st.rerun()
+        else:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.info("System Ready. Awaiting Input.")
+            
+        st.markdown('</div>', unsafe_allow_html=True)
 
-<<<<<<< Updated upstream
-with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft()) as iface:
-    gr.Markdown("# 🌙 Urdu OCR - UTRNet Visual Pipeline\nUpload FIR or any Urdu document to extract text with live processing feedback.")
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            inp = gr.Image(
-                type="pil",
-                label="📄 Upload Document",
-                sources=["upload", "clipboard"],
-                height=500
-=======
     # Right Column: Output
     with col2:
         st.markdown('<div class="custom-card"><h3>DIGITIZATION RESULTS</h3>', unsafe_allow_html=True)
@@ -355,46 +393,32 @@ with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft())
                 file_name="official_transcript.txt",
                 mime="text/plain",
                 type="secondary"
->>>>>>> Stashed changes
             )
-            run_btn = gr.Button("▶️ Run OCR", size="lg", variant="primary")
+        else:
+            # Empty state
+            st.markdown("""
+                <div style='text-align: center; color: #6b7280; padding: 4rem 0;'>
+                    <p style='font-weight: bold;'>NO DATA GENERATED</p>
+                    <p style='font-size: 0.8rem;'>Upload a document to generate an official record.</p>
+                </div>
+            """, unsafe_allow_html=True)
             
-            gr.Markdown("### 📋 Example Images")
-            gr.Examples(
-                examples,
-                inputs=inp,
-                label="Click to try examples"
-            )
-        
-        with gr.Column(scale=2):
-            status_box = gr.Textbox(label="⚙️ Processing Status", lines=10, max_lines=15, interactive=False)
-            recognized = gr.Textbox(label="📝 Recognized Text (Urdu)", lines=12)
-            struct = gr.JSON(label="📋 Formatted FIR Output")
-    
-    with gr.Accordion("🔧 Processing Details (Click to Expand)", open=False):
-        det_img = gr.Image(label="🎯 Detection Overlay with Numbered Boxes", type="pil")
-        
-        gallery = gr.Gallery(
-            label="✂️ Cropped Lines with OCR Preview",
-            columns=5,
-            height="auto",
-            show_label=True
-        )
-        
-        line_table = gr.Dataframe(
-            headers=["Line #", "Urdu Text"],
-            label="📖 Line-by-Line OCR Results",
-            wrap=True,
-            interactive=False
-        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-<<<<<<< Updated upstream
-    run_btn.click(
-        fn=predict,
-        inputs=inp,
-        outputs=[recognized, det_img, gallery, gallery, line_table, struct, status_box]
-    )
-=======
+def render_pipeline_view():
+    st.header("Pipeline Overview")
+    st.markdown("Detailed inspection of the OCR process.")
+    
+    if not st.session_state.processed:
+        if st.session_state.input_image:
+            st.warning("Image loaded but not processed. Go to 'OCR' tab or click Run below.")
+            if st.button("Run Pipeline Debug"):
+                run_pipeline(st.session_state.input_image)
+                st.rerun()
+        else:
+            st.info("Please upload an image in the 'OCR' section first.")
+        return
+
     # Tabs for details
     t1, t2, t3, t4 = st.tabs(["Detection", "Line Analysis", "Gemini Analysis", "Raw Data"])
     
@@ -452,7 +476,16 @@ with gr.Blocks(title="🌙 Urdu OCR - UTRNet Dashboard", theme=gr.themes.Soft())
             
     with t4:
         st.json(st.session_state.results['json'])
->>>>>>> Stashed changes
 
-if __name__ == "__main__":
-    iface.launch()
+
+# --- Main Layout ---
+st.sidebar.title("Navigation")
+view = st.sidebar.radio("Go to:", ["OCR", "Pipeline Overview"])
+
+st.sidebar.divider()
+st.sidebar.info("Use 'OCR' for quick results and 'Pipeline Overview' for debugging.")
+
+if view == "OCR":
+    render_ocr_view()
+else:
+    render_pipeline_view()
