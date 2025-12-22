@@ -1,4 +1,5 @@
 import torch.nn as nn
+
 try:
     from .modules.dropout_layer import dropout_layer
     from .modules.sequence_modeling import BidirectionalLSTM

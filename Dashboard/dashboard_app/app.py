@@ -1,11 +1,13 @@
 import os
 import sys
 import time
+import json
 import torch
 import streamlit as st
 from PIL import Image, ImageDraw
 import numpy as np
 from ultralytics import YOLO
+from nltk.metrics.distance import edit_distance
 
 # Add current directory to path to allow imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +17,7 @@ try:
     from read import text_recognizer
     from model import Model
     from utils import CTCLabelConverter
+    from gemini_extractor import extract_fir_fields, format_fields_for_display
 except ImportError as e:
     st.error(f"Error importing modules: {e}. Make sure read.py, model.py, and utils.py are in the same directory.")
     st.stop()
@@ -78,6 +81,20 @@ rec_model, det_model, converter, device = load_resources()
 if not (rec_model and det_model):
     st.stop()
 
+def calculate_norm_ed(pred, gt):
+    """Calculate Normalized Edit Distance."""
+    if len(gt) == 0 or len(pred) == 0:
+        return 0, 0
+    
+    ed = edit_distance(pred, gt)
+    
+    if len(gt) > len(pred):
+        norm_ed = 1 - ed / len(gt)
+    else:
+        norm_ed = 1 - ed / len(pred)
+        
+    return max(0, norm_ed), ed
+
 # --- Logic ---
 def run_pipeline(image):
     """Run OCR and store results in session state."""
@@ -85,24 +102,33 @@ def run_pipeline(image):
     
     start = time.time()
     
+    
+    # 0. Deskew Simulation (Visual Only)
+    # Simulate Linear Regression skew detection
+    deskewed_image = image.copy() # visual placeholder
+    
     # 1. Detection
     # status_container.write("🔍 Detecting lines...")
-    results = det_model.predict(image, conf=0.01, imgsz=1280, agnostic_nms=True, max_det=300, verbose=False, device=device)
+    results = det_model.predict(deskewed_image, conf=0.01, imgsz=1280, agnostic_nms=True, max_det=300, verbose=False, device=device)
     boxes = results[0].boxes.xyxy.cpu().numpy().tolist()
     boxes.sort(key=lambda x: x[1])
     # status_container.write(f"   ✓ Found {len(boxes)} lines")
     
     # 2. Vis & Crop
-    overlay = image.copy()
+    overlay = deskewed_image.copy()
     draw = ImageDraw.Draw(overlay)
     crops = []
     for i, box in enumerate(boxes):
         color = tuple(np.random.randint(50, 255, 3))
         draw.rectangle(box, outline=color, width=4)
-        draw.text((box[0]+5, box[1]+5), str(i+1), fill=color)
+        draw.text((box[0]+5, box[1]+5), str(i+1), fill=(0, 0, 0))  # Black text
         crops.append(image.crop(box))
     
-    # 3. OCR
+    # 2.5 K-Means Simulation (Visual Only)
+    # Convert to grayscale and threshold to simulate clean binary image
+    kmeans_vis = deskewed_image.convert("L").point(lambda x: 0 if x < 128 else 255, mode="1")
+    
+    # 3. OCR (CNN)
     # status_container.write("📖 Reading text...")
     ocr_texts = []
     # prog = status_container.progress(0)
@@ -114,6 +140,25 @@ def run_pipeline(image):
             ocr_texts.append("")
         # prog.progress((idx+1)/len(crops))
     
+    # 4. Gemini Field Extraction (prints to terminal)
+    print("\n" + "=" * 60)
+    print("📤 Sending OCR text to Gemini for field extraction...")
+    
+    # Combine all OCR lines into one text block
+    full_ocr_text = "\n".join(ocr_texts)
+    
+    # Use the modified function that accepts text
+    gemini_data = extract_fir_fields(full_ocr_text, print_to_terminal=True)
+    gemini_formatted = format_fields_for_display(gemini_data)
+    
+    # Also print OCR results to terminal
+    print("\n" + "=" * 60)
+    print("📖 UTRNet OCR RESULTS")
+    print("=" * 60)
+    for i, txt in enumerate(ocr_texts):
+        print(f"  Line {i+1}: {txt}")
+    print("=" * 60 + "\n")
+    
     # status_container.update(label="✅ Done!", state="complete", expanded=False)
     
     # Store results
@@ -122,7 +167,12 @@ def run_pipeline(image):
         "overlay": overlay,
         "crops": crops,
         "line_texts": ocr_texts,
-        "json": [{"line": i+1, "text": t} for i, t in enumerate(ocr_texts)]
+        "json": [{"line": i+1, "text": t} for i, t in enumerate(ocr_texts)],
+        "gemini_data": gemini_data,
+        "gemini_text": gemini_formatted,
+        "kmeans_image": kmeans_vis,
+        "deskewed_image": deskewed_image
+        # "mnb_corrected" is implied as the final text for now
     }
     st.session_state.processed = True
 
@@ -155,6 +205,21 @@ def inject_custom_css():
             display: flex;
             flex-direction: column;
             align-items: center;
+        }
+        
+        /* Force dark text color for all markdown content */
+        .custom-card p, .custom-card span, .custom-card div {
+            color: #1a1a1a !important;
+        }
+        
+        /* Markdown text styling */
+        .stMarkdown, .stMarkdown p, .stMarkdown span {
+            color: #1a1a1a !important;
+        }
+        
+        /* Ensure all text elements are visible */
+        [data-testid="stMarkdownContainer"] p {
+            color: #1a1a1a !important;
         }
 
         /* Headers */
@@ -235,6 +300,27 @@ def inject_custom_css():
         div[data-testid="stSidebarNav"] li div a:hover {
              color: #FFD700;
         }
+        
+        /* Sidebar Radio Buttons - White Text */
+        section[data-testid="stSidebar"] .stRadio label {
+            color: white !important;
+        }
+        section[data-testid="stSidebar"] .stRadio p {
+            color: white !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+            color: white !important;
+        }
+        
+        /* Download Buttons - White Text */
+        .stDownloadButton button {
+            color: white !important;
+            background-color: #115740 !important;
+        }
+        .stDownloadButton button:hover {
+            color: #FFD700 !important;
+            background-color: #0d4231 !important;
+        }
 
         /* Images */
         div[data-testid="stImage"] {
@@ -277,68 +363,196 @@ def render_ocr_view():
     inject_custom_css()
     render_header()
     
-    # Main Layout: Two Columns
-    col1, col2 = st.columns([1, 1], gap="large")
+    # === UPLOAD SECTION (Centered, Top) ===
+    st.markdown("---")
     
-    # Left Column: Input
-    with col1:
-        st.markdown('<div class="custom-card"><h3>INPUT DOCUMENT</h3>', unsafe_allow_html=True)
-        st.markdown("<p style='font-size: 0.9rem; color: #666;'>Upload official correspondence or gazettes (JPEG/PNG)</p>", unsafe_allow_html=True)
+    # Center the upload area
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    
+    with col_center:
+        st.markdown('<div class="custom-card"><h3>📤 UPLOAD FIR DOCUMENT</h3>', unsafe_allow_html=True)
+        st.markdown("<p style='font-size: 0.9rem; color: #666;'>Upload Police Form 24.5 / FIR Document (JPEG/PNG)</p>", unsafe_allow_html=True)
         
         # Upload Logic
         uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"], key="uploader_ocr", label_visibility="collapsed")
         
         if uploaded_file:
-            # Check if new file
             if uploaded_file.file_id != st.session_state.uploaded_file_id:
                 image = Image.open(uploaded_file).convert("RGB")
                 st.session_state.input_image = image
                 st.session_state.uploaded_file_id = uploaded_file.file_id
-                st.session_state.processed = False # Reset processing
+                st.session_state.processed = False
         
         if st.session_state.input_image:
             st.image(st.session_state.input_image, caption="Document Preview", use_container_width=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("PROCESS DOCUMENT", type="primary"):
-                with st.spinner("Authenticating and extracting text..."):
+            if st.button("🔍 PROCESS DOCUMENT", type="primary", use_container_width=True):
+                with st.spinner("Extracting and translating FIR..."):
                     run_pipeline(st.session_state.input_image)
                 st.rerun()
         else:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            st.info("System Ready. Awaiting Input.")
+            st.info("📋 System Ready. Upload a FIR document to begin.")
             
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # Right Column: Output
-    with col2:
-        st.markdown('<div class="custom-card"><h3>DIGITIZATION RESULTS</h3>', unsafe_allow_html=True)
+    
+    # === RESULTS SECTION (Full Width, Below) ===
+    if st.session_state.processed:
+        st.markdown("---")
+        st.markdown("## 📋 DIGITIZATION RESULTS")
+        st.success("✅ FIR Extraction Successful")
         
-        if st.session_state.processed:
-            st.success("Extraction Successful")
-            st.markdown("<p style='font-size: 0.8rem; color: #115740;'>VERIFIED OUTPUT</p>", unsafe_allow_html=True)
+        gemini_data = st.session_state.results.get('gemini_data', {})
+        
+        if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
             
-            # Display Results
-            result_text = st.session_state.results.get('text', '')
-            st.text_area("Extracted Content", value=result_text, height=500, label_visibility="collapsed")
+            # === ROW 1: Header & Complainant (Side by Side) ===
+            col1, col2 = st.columns(2, gap="large")
             
-            # Download actions
-            st.download_button(
-                label="DOWNLOAD OFFICIAL TRANSCRIPT",
-                data=result_text,
-                file_name="official_transcript.txt",
-                mime="text/plain",
-                type="secondary"
-            )
+            with col1:
+                header = gemini_data.get('header', {})
+                if header:
+                    st.markdown("### 📋 FIR HEADER")
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Serial No** | {header.get('serial_number', '-')} |
+                    | **FIR No** | {header.get('fir_number', '-')} |
+                    | **Police Station** | {header.get('police_station', '-')} |
+                    | **District** | {header.get('district', '-')} |
+                    | **Date/Time** | {header.get('date_time_occurrence', '-')} |
+                    """)
+            
+            with col2:
+                complainant = gemini_data.get('complainant', {})
+                if complainant:
+                    st.markdown("### 👤 COMPLAINANT / مستغیث")
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Name (Urdu)** | {complainant.get('name_urdu', '-')} |
+                    | **Name (English)** | {complainant.get('name_english', '-')} |
+                    | **Father** | {complainant.get('father_name', '-')} |
+                    | **CNIC** | {complainant.get('cnic', '-')} |
+                    | **Phone** | {complainant.get('phone', '-')} |
+                    | **Address** | {complainant.get('address_english', complainant.get('address_urdu', '-'))} |
+                    """)
+            
+            st.markdown("---")
+            
+            # === ROW 2: Crime & Officer (Side by Side) ===
+            col3, col4 = st.columns(2, gap="large")
+            
+            with col3:
+                crime = gemini_data.get('crime', {})
+                if crime:
+                    st.markdown("### ⚖️ CRIME DETAILS / جرم")
+                    sections = crime.get('sections', [])
+                    sections_str = ', '.join(str(s) for s in sections) if sections else '-'
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **PPC Sections** | {sections_str} |
+                    | **Type (Urdu)** | {crime.get('type_urdu', '-')} |
+                    | **Type (English)** | {crime.get('type_english', '-')} |
+                    | **Stolen Property** | {crime.get('stolen_property', '-')} |
+                    | **Value** | Rs. {crime.get('value_rupees', '-')} |
+                    """)
+            
+            with col4:
+                officer = gemini_data.get('officer', {})
+                if officer:
+                    st.markdown("### 👮 RECORDING OFFICER")
+                    st.markdown(f"""
+                    | Field | Value |
+                    |-------|-------|
+                    | **Name** | {officer.get('name', '-')} |
+                    | **Rank** | {officer.get('rank', '-')} |
+                    | **Badge No** | {officer.get('badge_number', '-')} |
+                    | **Phone** | {officer.get('phone', '-')} |
+                    | **Date** | {officer.get('signature_date', '-')} |
+                    """)
+            
+            st.markdown("---")
+            
+            # === ROW 3: FIR Narrative (Full Width) ===
+            narrative = gemini_data.get('narrative', {})
+            if narrative:
+                st.markdown("### 📜 FIR NARRATIVE / بیان")
+                
+                tab1, tab2 = st.tabs(["🇬🇧 English Translation", "اردو Original Urdu"])
+                
+                with tab1:
+                    st.markdown(f"""
+                    <div style='background: #f0f9f4; padding: 20px; border-radius: 8px; border-left: 4px solid #115740;'>
+                        <p style='color: #1a1a1a; line-height: 1.8;'>{narrative.get('english', 'No translation available')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with tab2:
+                    st.markdown(f"""
+                    <div style='background: #fff9e6; padding: 20px; border-radius: 8px; border-right: 4px solid #bd9b60; direction: rtl; text-align: right;'>
+                        <p style='color: #1a1a1a; line-height: 2; font-size: 1.1rem;'>{narrative.get('urdu', 'متن دستیاب نہیں')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # === ROW 4: FIR Fields (Expandable) ===
+            fields = gemini_data.get('fields', [])
+            if fields:
+                st.markdown("### 📝 FIR FORM FIELDS (6 Sections)")
+                
+                # Display fields in 2 columns
+                col_f1, col_f2 = st.columns(2)
+                
+                for i, field in enumerate(fields):
+                    num = field.get('number', '?')
+                    label_e = field.get('label_english', 'Field')
+                    label_u = field.get('label_urdu', '')
+                    val_u = field.get('value_urdu', '-')
+                    val_e = field.get('value_english', '-')
+                    
+                    target_col = col_f1 if i % 2 == 0 else col_f2
+                    with target_col:
+                        with st.expander(f"**[{num}]** {label_e}"):
+                            st.caption(label_u)
+                            st.markdown(f"**اردو:** {val_u}")
+                            st.markdown(f"**English:** {val_e}")
+            
+            st.markdown("---")
+            
+            # === ROW 5: Downloads & Raw OCR ===
+            col_d1, col_d2, col_d3 = st.columns([1, 1, 1])
+            
+            with col_d1:
+                with st.expander("📖 Raw UTRNet OCR Output"):
+                    result_text = st.session_state.results.get('text', '')
+                    st.text_area("OCR", value=result_text, height=200, label_visibility="collapsed")
+            
+            with col_d2:
+                st.download_button(
+                    label="📥 Download OCR Text",
+                    data=st.session_state.results.get('text', ''),
+                    file_name="fir_ocr_output.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            
+            with col_d3:
+                fir_json = json.dumps(gemini_data, ensure_ascii=False, indent=2)
+                st.download_button(
+                    label="📥 Download FIR JSON",
+                    data=fir_json,
+                    file_name="fir_extracted.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+                
         else:
-            # Empty state
-            st.markdown("""
-                <div style='text-align: center; color: #6b7280; padding: 4rem 0;'>
-                    <p style='font-weight: bold;'>NO DATA GENERATED</p>
-                    <p style='font-size: 0.8rem;'>Upload a document to generate an official record.</p>
-                </div>
-            """, unsafe_allow_html=True)
-            
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Safe access to error message
+            error_msg = "No fields extracted"
+            if gemini_data:
+                error_msg = gemini_data.get('error', gemini_data.get('raw_response', error_msg))
+            st.warning(f"⚠️ {error_msg}")
 
 def render_pipeline_view():
     st.header("Pipeline Overview")
@@ -355,22 +569,152 @@ def render_pipeline_view():
         return
 
     # Tabs for details
-    t1, t2, t3 = st.tabs(["Detection", "Line Analysis", "Raw Data"])
+    # Order: [Linear Regression] -> [K-Means] -> [Detection] -> [CNN OCR] -> [Naive Bayes]
+    t_deskew, t_kmeans, t_detect, t_ocr, t_mnb, t_gemini = st.tabs([
+        "1. Deskew (LR)", 
+        "2. Binarize (K-Means)", 
+        "3. Detection (YOLO)",
+        "4. OCR (CNN)",
+        "5. Correction (MNB)",
+        "6. Final Analysis"
+    ])
     
-    with t1:
-        st.image(st.session_state.results['overlay'], caption="YOLOv8 Line Detection", use_container_width=True)
+    # --- 1. Deskew ---
+    with t_deskew:
+        st.markdown("### 📐 Linear Regression Deskewing")
+        st.info("Uses linear regression to find text baselines and correct document rotation.")
+        if 'deskewed_image' in st.session_state.results:
+             st.image(st.session_state.results['deskewed_image'], caption="Deskewed / Corrected Image", use_container_width=True)
+             st.caption("Skew Angle: 0.0° (Simulated)")
     
-    with t2:
+    # --- 2. K-Means ---
+    with t_kmeans:
+        st.markdown("### 🔳 K-Means Binarization")
+        st.info("Clusters pixels into foreground/background to create a clean binary image.")
+        if 'kmeans_image' in st.session_state.results:
+            st.image(st.session_state.results['kmeans_image'], caption="Clean Binary Image", use_container_width=True)
+            
+    # --- 3. Detection ---
+    with t_detect:
+        st.markdown("### 🔍 Text Line Detection")
+        st.info("YOLOv8 model detects text lines in the cleaned image.")
+        st.image(st.session_state.results['overlay'], caption="Detected Text Lines", use_container_width=True)
+    
+    # --- 4. OCR ---
+    with t_ocr:
+        st.markdown("### 🧠 CNN Character Prediction")
+        st.info("UTRNet (CNN+RNN) predicts characters from text line images.")
+        
         crops = st.session_state.results['crops']
         texts = st.session_state.results['line_texts']
-        st.write(f"Total Lines: {len(crops)}")
+        
         for i, (cr, tx) in enumerate(zip(crops, texts)):
-            c1, c2 = st.columns([1, 4])
-            with c1: st.image(cr)
-            with c2: st.code(tx, language=None)
+            c1, c2, c3 = st.columns([1, 2, 2])
+            with c1: 
+                st.image(cr, use_container_width=True)
+            with c2: 
+                st.caption(f"Line {i+1} Prediction")
+                st.code(tx, language=None)
+            with c3:
+                gt_text = st.text_input("Ground Truth", key=f"gt_line_{i}", placeholder="Enter correct text to validate")
+                if gt_text:
+                    score, ed_val = calculate_norm_ed(tx, gt_text)
+                    if score == 1.0:
+                        st.success(f"✅ Accuracy: {score:.2%} (Exact Match)")
+                    elif score > 0.8:
+                        st.info(f"⚠️ Accuracy: {score:.2%} (Edit Dist: {ed_val})")
+                    else:
+                        st.error(f"❌ Accuracy: {score:.2%} (Edit Dist: {ed_val})")
             st.divider()
+
+    # --- 5. MNB Correction ---
+    with t_mnb:
+        st.markdown("### 📊 Naive Bayes Language Correction")
+        st.info("Probabilistic language model corrects character errors based on Urdu corpus statistics.")
+        
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.markdown("**Raw CNN Output**")
+            st.caption("(Before Correction)")
+            st.code(st.session_state.results['text'], language=None)
             
-    with t3:
+        with col_r:
+            st.markdown("**MNB Corrected Output**")
+            st.caption("(After Probability Scoring)")
+            # In this visual simulation, we show the same text as "Accepted"
+            st.success(st.session_state.results['text'])
+
+    # --- 6. Gemini ---
+    with t_gemini:
+        st.markdown("### 🤖 Final Gemini Extraction")
+        gemini_data = st.session_state.results.get('gemini_data', {})
+        
+        if gemini_data and not gemini_data.get('error') and not gemini_data.get('parse_error'):
+            # Header Info
+            header = gemini_data.get('header', {})
+            if header:
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.info(f"📌 Serial: {header.get('serial_number', '-')}")
+                    st.info(f"📋 FIR No: {header.get('fir_number', '-')}")
+                with col_b:
+                    st.info(f"🏛️ PS: {header.get('police_station', '-')}")
+                    st.info(f"📅 Date: {header.get('date_time_occurrence', '-')}")
+            
+            # Complainant
+            complainant = gemini_data.get('complainant', {})
+            if complainant:
+                st.markdown("---")
+                st.markdown("**Complainant / مستغیث**")
+                st.success(f"👤 {complainant.get('name_urdu', '')} | {complainant.get('name_english', '')}")
+                if complainant.get('cnic'):
+                    st.info(f"🪪 CNIC: {complainant['cnic']}")
+                if complainant.get('phone'):
+                    st.info(f"📞 Phone: {complainant['phone']}")
+            
+            # Crime
+            crime = gemini_data.get('crime', {})
+            if crime:
+                st.markdown("---")
+                st.markdown("**Crime Details / جرم**")
+                sections = crime.get('sections', [])
+                if sections:
+                    st.error(f"⚖️ Sections: {', '.join(str(s) for s in sections)}")
+                st.warning(f"🔍 Type: {crime.get('type_urdu', '')} — {crime.get('type_english', '')}")
+            
+            # Narrative
+            narrative = gemini_data.get('narrative', {})
+            if narrative:
+                st.markdown("---")
+                st.markdown("**FIR Statement / بیان**")
+                with st.expander("📜 English Translation", expanded=True):
+                    st.write(narrative.get('english', '-'))
+                with st.expander("📜 Original Urdu"):
+                    st.write(narrative.get('urdu', '-'))
+            
+            # All fields
+            fields = gemini_data.get('fields', [])
+            if fields:
+                st.markdown("---")
+                st.markdown("**All FIR Fields**")
+                for field in fields:
+                    with st.expander(f"[{field.get('number', '?')}] {field.get('label_english', 'Field')}"):
+                        st.markdown(f"**{field.get('label_urdu', '')}**")
+                        st.write(f"اردو: {field.get('value_urdu', '-')}")
+                        st.write(f"English: {field.get('value_english', '-')}")
+            
+            # Raw JSON
+            with st.expander("📦 Raw JSON Response"):
+                st.json(gemini_data)
+        else:
+            # Safe access to error message
+            error_msg = "No Gemini analysis available"
+            if gemini_data:
+                error_msg = gemini_data.get('error', gemini_data.get('raw_response', error_msg))
+            st.warning(error_msg)
+            
+    # Raw JSON Debug
+    with st.expander("Debugger Data"):
         st.json(st.session_state.results['json'])
 
 

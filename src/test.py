@@ -1,11 +1,4 @@
-"""
-Paper: "UTRNet: High-Resolution Urdu Text Recognition In Printed Documents" presented at ICDAR 2023
-Authors: Abdur Rahman, Arjun Ghosh, Chetan Arora
-GitHub Repository: https://github.com/abdur75648/UTRNet-High-Resolution-Urdu-Text-Recognition
-Project Website: https://abdur75648.github.io/UTRNet/
-Copyright (c) 2023-present: This work is licensed under the Creative Commons Attribution-NonCommercial
-4.0 International License (http://creativecommons.org/licenses/by-nc/4.0/)
-"""
+
 
 import os,shutil
 import time
@@ -15,7 +8,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import pytz
-
 import torch
 import torch.utils.data
 import torch.nn.functional as F

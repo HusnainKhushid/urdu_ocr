@@ -3,6 +3,7 @@ import math
 import torch
 from PIL import Image
 import torch.utils.data
+
 try:
     from .utils import NormalizePAD
 except ImportError:
